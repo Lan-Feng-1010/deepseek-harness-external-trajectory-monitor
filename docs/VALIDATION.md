@@ -2,8 +2,8 @@
 
 ## Current package
 
-- Plugin version: `0.5.1`
-- Native live projection: `4.1.0`
+- Plugin version: `0.5.2`
+- Native live projection: `4.2.0`
 - Normalized ledger schema: `external-trajectory-ledger-v3`
 - Initially accepted Harness revision: `0.1.0-rc.5`, commit
   `47f943859bef60e4160492346772ded9b24f765a`
@@ -18,6 +18,7 @@ events. It verifies:
   `lib/client.js`;
 - generic `external-agent-event-v1` Request/tool/result projection;
 - native ImplantAgent v0.8 request/action/tool/result projection;
+- distinct yellow tool rows and ledger records for a reused logical call ID with incremented retry index;
 - fail-closed rejection of unmatched generic tool results and invalid request ownership;
 - monotonically increasing Request steps;
 - every Tool follows a linked assistant request in the same step;
@@ -31,8 +32,9 @@ events. It verifies:
 - deterministic `trajectory_stats` filtering;
 - mirrored-session execution guard.
 
-The `0.5.1` release keeps the Cordis ID and plugin entrypoints while adding
-native ImplantAgent v0.8 trace support and live-manifest hot reload. The generic
+The `0.5.2` release keeps the Cordis ID and plugin entrypoints while adding
+native ImplantAgent v0.8 trace support, retry-aware call identity and
+live-manifest hot reload. The generic
 live adapter and ledger v3 remain unchanged. The synthetic regression is executed against
 the compiled JavaScript package export, rather than importing the TypeScript
 source directly.

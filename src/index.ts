@@ -51,7 +51,7 @@ const DEFAULT_LIVE_MANIFEST_PATH = fileURLToPath(new URL('./live-sources.json', 
 const DEFAULT_LEDGER_ROOT = fileURLToPath(new URL('./generated-ledgers', import.meta.url))
 const SESSION_PREFIX = 'session-external-trajectory-'
 export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v3-2`
-export const NATIVE_LIVE_PROJECTION_VERSION = '4.1.0'
+export const NATIVE_LIVE_PROJECTION_VERSION = '4.2.0'
 export const NORMALIZED_LEDGER_SCHEMA = 'external-trajectory-ledger-v3'
 const TRACE_ROUTE = '/api/external-reasoning-trace'
 const TOOL_ITEM_TYPES = new Set(['command_execution', 'file_change', 'web_search', 'mcp_tool_call'])
@@ -1107,7 +1107,7 @@ function liveRunRecord(records: readonly JsonlRecord[], details: LatestLiveFile[
 export function nativeLiveSessionId(source: LiveSource, path: string, caseId: string): string {
   const sessionProjection = source.kind === 'generic'
     ? 'v4'
-    : source.kind === 'implantagent-trace' ? 'v4-1' : 'v3-2'
+    : source.kind === 'implantagent-trace' ? 'v4-2' : 'v3-2'
   return `${SESSION_PREFIX}native-${sessionProjection}-${sanitizeId(source.id)}-${sanitizeId(caseId)}-${sha256Text(path).slice(0, 12)}`
 }
 
@@ -1775,10 +1775,16 @@ function implantAgentVisibleToolName(toolId: string): string {
   return title === undefined ? toolId : `${toolId} · ${title}`
 }
 
-function implantAgentCallId(state: NativeLiveState, event: JsonObject, record: JsonlRecord): string {
+function implantAgentObservableCallId(event: JsonObject, record: JsonlRecord): string {
   const raw = requireNonEmptyString(event.call_id, `ImplantAgent tool event at line ${record.line} call_id`)
   const normalized = sanitizeId(raw) || sha256Text(raw).slice(0, 12)
-  return `external-live-implantagent-${sanitizeId(state.source.id)}-${normalized}`
+  const revision = Number.isSafeInteger(event.node_revision) ? `-revision-${event.node_revision}` : ''
+  const retry = Number.isSafeInteger(event.retry_index) ? `-retry-${event.retry_index}` : ''
+  return `${normalized}${revision}${retry}`
+}
+
+function implantAgentCallId(state: NativeLiveState, event: JsonObject, record: JsonlRecord): string {
+  return `external-live-implantagent-${sanitizeId(state.source.id)}-${implantAgentObservableCallId(event, record)}`
 }
 
 function implantAgentAuditMetadata(event: JsonObject): ToolAuditMetadata {
@@ -2250,7 +2256,7 @@ function buildImplantAgentToolTrace(context: JsonObject, records: readonly Jsonl
         continue
       }
       if (type === 'tool_call') {
-        const rawCallId = typeof row.call_id === 'string' ? row.call_id : `line-${record.line}`
+        const rawCallId = implantAgentObservableCallId(row, record)
         const toolId = typeof row.tool_id === 'string' ? row.tool_id.toUpperCase() : 'UNKNOWN'
         const argumentsText = redactObservableText(row.arguments_summary ?? {})
         const audit = implantAgentAuditMetadata(row)
@@ -2286,7 +2292,7 @@ function buildImplantAgentToolTrace(context: JsonObject, records: readonly Jsonl
         continue
       }
       if (type === 'tool_result') {
-        const rawCallId = typeof row.call_id === 'string' ? row.call_id : `line-${record.line}`
+        const rawCallId = implantAgentObservableCallId(row, record)
         const tool = toolsById.get(rawCallId)
         if (tool === undefined) continue
         const status = String(row.status ?? '').trim().toLowerCase()

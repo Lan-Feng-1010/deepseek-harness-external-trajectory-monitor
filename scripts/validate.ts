@@ -307,27 +307,32 @@ appendNativeLiveRecords(implantTraceState, jsonlRecords([
   { sequence: 2, observed_at: '2026-08-15T12:00:01.000Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'request_started', request_id: 'run-v08:request:1', module_id: 'M1', allowed_tool_ids: ['T01'] },
   { sequence: 3, observed_at: '2026-08-15T12:00:01.100Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'action_selected', request_id: 'run-v08:request:1', module_id: 'M1', action: 'call_tool', tool_id: 'T01', public_reason: 'Load trusted segmentations.' },
   { sequence: 4, observed_at: '2026-08-15T12:00:01.200Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_call', request_id: 'run-v08:request:1', module_id: 'M1', tool_id: 'T01', call_id: 'run-v08:T01:r0', raw_tool_name: 'node_runtime_tools.t01_segmentation_runtime.run_t01_segmentation_selection', arguments_summary: { toothfairy3_path: 'redacted-fixture.nii.gz' }, retry_index: 0, invocation_count: 1 },
-  { sequence: 5, observed_at: '2026-08-15T12:00:01.500Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_result', request_id: 'run-v08:request:1', module_id: 'M1', tool_id: 'T01', call_id: 'run-v08:T01:r0', status: 'completed', duration_ms: 300, result_summary: { selected: true } },
+  { sequence: 5, observed_at: '2026-08-15T12:00:01.500Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_result', request_id: 'run-v08:request:1', module_id: 'M1', tool_id: 'T01', call_id: 'run-v08:T01:r0', status: 'completed', duration_ms: 300, result_summary: { selected: true }, retry_index: 0 },
   { sequence: 6, observed_at: '2026-08-15T12:00:02.000Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'request_started', request_id: 'run-v08:request:2', module_id: 'M2', allowed_tool_ids: ['T02'] },
   { sequence: 7, observed_at: '2026-08-15T12:00:02.100Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'action_selected', request_id: 'run-v08:request:2', module_id: 'M2', action: 'call_tool', tool_id: 'T02', public_reason: 'Generate candidate sites.' },
   { sequence: 8, observed_at: '2026-08-15T12:00:02.200Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_call', request_id: 'run-v08:request:2', module_id: 'M2', tool_id: 'T02', call_id: 'run-v08:T02:r0', raw_tool_name: 'node_runtime_tools.t02_candidate_runtime.run_t02_candidate_generation', arguments_summary: {}, retry_index: 0, invocation_count: 1 },
-  { sequence: 9, observed_at: '2026-08-15T12:00:02.600Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_result', request_id: 'run-v08:request:2', module_id: 'M2', tool_id: 'T02', call_id: 'run-v08:T02:r0', status: 'technical_failure', duration_ms: 400, error_type: 'FixtureError', error_message: 'Synthetic fixture failure.' },
-  { sequence: 10, observed_at: '2026-08-15T12:00:03.000Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'run_finished', status: 'technical_failure', finish_reason: 'T02_technical_failure' },
+  { sequence: 9, observed_at: '2026-08-15T12:00:02.600Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_result', request_id: 'run-v08:request:2', module_id: 'M2', tool_id: 'T02', call_id: 'run-v08:T02:r0', status: 'technical_failure', duration_ms: 400, error_type: 'FixtureError', error_message: 'Synthetic fixture failure.', retry_index: 0 },
+  { sequence: 10, observed_at: '2026-08-15T12:00:03.000Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'request_started', request_id: 'run-v08:request:3', module_id: 'M2', allowed_tool_ids: ['T02'] },
+  { sequence: 11, observed_at: '2026-08-15T12:00:03.100Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'action_selected', request_id: 'run-v08:request:3', module_id: 'M2', action: 'call_tool', tool_id: 'T02', public_reason: 'Retry the same logical call after infrastructure failure.' },
+  { sequence: 12, observed_at: '2026-08-15T12:00:03.200Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_call', request_id: 'run-v08:request:3', module_id: 'M2', tool_id: 'T02', call_id: 'run-v08:T02:r0', raw_tool_name: 'node_runtime_tools.t02_candidate_runtime.run_t02_candidate_generation', arguments_summary: {}, retry_index: 1, invocation_count: 2 },
+  { sequence: 13, observed_at: '2026-08-15T12:00:03.600Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'tool_result', request_id: 'run-v08:request:3', module_id: 'M2', tool_id: 'T02', call_id: 'run-v08:T02:r0', status: 'technical_failure', duration_ms: 400, error_type: 'FixtureError', error_message: 'Synthetic fixture failure after retry.', retry_index: 1 },
+  { sequence: 14, observed_at: '2026-08-15T12:00:04.000Z', run_id: 'run-v08', case_id: 'CASE_V08', event_type: 'run_finished', status: 'technical_failure', finish_reason: 'T02_technical_failure' },
 ]))
 validateRelationalEvents(implantTraceSession.events)
 assertEveryToolFollowsLinkedAssistant(implantTraceSession.events)
 assert.deepEqual(
   implantTraceSession.events.filter(event => event.type === 'step/start').map(event => event.data.step),
-  [1, 2],
+  [1, 2, 3],
 )
 const implantTraceCalls = implantTraceSession.events.filter(event => event.type === 'tool/call')
-assert.equal(implantTraceCalls.length, 2)
+assert.equal(implantTraceCalls.length, 3)
 assert.match(implantTraceCalls[0]?.data.name, /^T01 ·/)
 assert.equal(implantTraceCalls[0]?.data.meta.moduleId, 'M1')
 assert.equal(implantTraceCalls[1]?.data.meta.nodeId, 'T02')
 const implantTraceLedger = unflushedNativeLedgerRecords(implantTraceState)
-assert.equal(implantTraceLedger.filter(row => row.event_type === 'tool_call').length, 2)
-assert.equal(implantTraceLedger.filter(row => row.event_type === 'tool_result').length, 2)
+assert.equal(implantTraceLedger.filter(row => row.event_type === 'tool_call').length, 3)
+assert.equal(implantTraceLedger.filter(row => row.event_type === 'tool_result').length, 3)
+assert.deepEqual(implantTraceLedger.filter(row => row.node_id === 'T02' && row.event_type === 'tool_call').map(row => row.retry_index), [0, 1])
 assert.equal(implantTraceLedger.find(row => row.node_id === 'T01' && row.event_type === 'tool_call')?.raw_tool_name, 'node_runtime_tools.t01_segmentation_runtime.run_t01_segmentation_selection')
 assert.equal(implantTraceLedger.filter(row => row.event_type === 'run_terminal').length, 1)
 
@@ -467,6 +472,7 @@ const report = {
     genericExternalAgentFailClosed: true,
     implantAgentV08TraceRequestToolProjection: true,
     implantAgentV08FailureProjection: true,
+    implantAgentRepeatedCallIdRetriesPreserved: true,
     localUserAndCasePathsAbsent: true,
     requestStepsIncrement: true,
     everyToolFollowsLinkedAssistantRequest: true,

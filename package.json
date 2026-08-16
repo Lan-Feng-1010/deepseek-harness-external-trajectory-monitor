@@ -1,6 +1,6 @@
 {
   "name": "dsh-external-trajectory-importer",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "description": "Read-only live trajectory projection and deterministic statistics for any external agent process in DeepSeek Harness.",

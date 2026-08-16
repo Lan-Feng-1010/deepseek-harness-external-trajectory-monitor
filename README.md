@@ -2,8 +2,8 @@
 
 DeepSeek Harness's universal external agent real-time trajectory monitoring plugin. It passively observes publicly exposed JSONL events continuously appended by any external agent process, projects them into Harness's native Trajectory UI, and simultaneously generates a comparable append-only normalized ledger. Codex and Claude use built-in adapters; other agents use the unified `external-agent-event-v1` protocol.
 
-Current plugin version: `0.5.1`<br>
-Native real-time projection version: `4.1.0`
+Current plugin version: `0.5.2`<br>
+Native real-time projection version: `4.2.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
 > DeepSeek Harness is still pre-release, so compatibility must be revalidated
@@ -94,11 +94,12 @@ Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
 
-Version `0.5.1` uses TypeScript authoring for both Host and Client. Harness still
+Version `0.5.2` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
 `trajectory_stats` tool and SessionEvent projection remain compatible. Version
-`0.5.1` adds native v0.8 ImplantAgent trace projection and hot-reloads the live
-source manifest, while retaining the generic adapter and ledger schema v3.
+`0.5.2` adds native v0.8 ImplantAgent trace projection, preserves repeated
+logical call IDs by separating revision/retry attempts, and hot-reloads the live
+source manifest while retaining the generic adapter and ledger schema v3.
 
 Relevant upstream documents:
 

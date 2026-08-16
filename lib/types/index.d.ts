@@ -4,7 +4,7 @@ export type { HistoricalSource, JsonlRecord, LedgerFields, LiveSource, MonitorSt
 export declare const name = "external-trajectory-importer";
 export declare const inject: string[];
 export declare const LIVE_MONITOR_SESSION_ID = "session-external-trajectory-live-monitor-v3-2";
-export declare const NATIVE_LIVE_PROJECTION_VERSION = "4.1.0";
+export declare const NATIVE_LIVE_PROJECTION_VERSION = "4.2.0";
 export declare const NORMALIZED_LEDGER_SCHEMA = "external-trajectory-ledger-v3";
 export declare function loadManifest(path?: string): Promise<SourceManifest>;
 export declare function loadLiveManifest(path?: string): Promise<LiveManifest>;
