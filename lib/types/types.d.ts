@@ -222,6 +222,7 @@ export interface LaunchPlan {
     readonly maxConcurrentRuns: number;
     readonly requiredPaths: readonly string[];
     readonly requiredEmptyDirectories: readonly string[];
+    readonly completionPaths: readonly string[];
     readonly cases: readonly LaunchCaseSpec[];
     readonly command: LaunchCommandSpec;
     readonly sources: readonly LaunchSourceTemplate[];

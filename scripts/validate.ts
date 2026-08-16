@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -509,8 +509,18 @@ try {
     'const root = process.argv[2]',
     "appendFileSync(join(root, 'logs', 'codex', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'turn.completed', usage: {} }) + '\\n')",
     "appendFileSync(join(root, 'logs', 'claude', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'result', subtype: 'success', is_error: false }) + '\\n')",
+    "appendFileSync(join(root, 'completion.marker'), 'complete\\n')",
     'await new Promise(resolve => setTimeout(resolve, 400))',
   ].join('\n'), 'utf8')
+  await writeFile(join(templateRoot, 'synthetic-no-output.mjs'), 'process.exit(0)\n', 'utf8')
+  if (process.platform === 'win32') {
+    await writeFile(join(templateRoot, 'synthetic-windows-supervisor.ps1'), [
+      'param([Parameter(Mandatory = $true)][string]$RunRoot)',
+      "$marker = Join-Path $RunRoot 'powershell-completion.marker'",
+      "Set-Content -LiteralPath $marker -Value 'complete' -Encoding utf8",
+      'exit 0',
+    ].join('\n'), 'utf8')
+  }
   await writeFile(baseManifestPath, `${JSON.stringify({ schemaVersion: 1, sources: [] }, null, 2)}\n`, 'utf8')
   const fixturePlan = {
     id: 'fixture-sequential',
@@ -520,6 +530,7 @@ try {
     maxConcurrentRuns: 1,
     requiredPaths: ['required.txt', 'synthetic-supervisor.mjs'],
     requiredEmptyDirectories: ['logs/codex', 'logs/claude', 'ledgers/codex', 'ledgers/claude'],
+    completionPaths: ['completion.marker'],
     cases: [{ caseId: 'CASE_FIXTURE', templateRoot }],
     command: {
       executable: process.execPath,
@@ -549,15 +560,50 @@ try {
       },
     ],
   }
+  const windowsPowerShellPlans = process.platform === 'win32'
+    ? [{
+        ...fixturePlan,
+        id: 'fixture-windows-powershell',
+        label: 'Synthetic Windows PowerShell supervisor',
+        requiredPaths: ['required.txt', 'synthetic-windows-supervisor.ps1'],
+        completionPaths: ['powershell-completion.marker'],
+        command: {
+          executable: join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+          arguments: [
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            '{run_root}\\synthetic-windows-supervisor.ps1',
+            '-RunRoot',
+            '{run_root}',
+          ],
+          cwd: '{run_root}',
+        },
+      }]
+    : []
   const planDocument = {
     schemaVersion: 1,
     plans: [
       fixturePlan,
       { ...fixturePlan, id: 'fixture-secondary', label: 'Second synthetic external agent plan' },
+      {
+        ...fixturePlan,
+        id: 'fixture-no-output',
+        label: 'Synthetic false-success guard',
+        requiredPaths: ['required.txt', 'synthetic-no-output.mjs'],
+        command: {
+          executable: process.execPath,
+          arguments: ['{run_root}\\synthetic-no-output.mjs'],
+          cwd: '{run_root}',
+        },
+      },
+      ...windowsPowerShellPlans,
     ],
   }
   await writeFile(plansPath, `${JSON.stringify(planDocument, null, 2)}\n`, 'utf8')
-  assert.equal((await loadLaunchPlans(plansPath)).plans.length, 2)
+  assert.equal((await loadLaunchPlans(plansPath)).plans.length, 3 + windowsPowerShellPlans.length)
   const launchManager = new PreexperimentLaunchManager({ plansPath, registrationRoot, runRegistryRoot })
   const catalog = await launchManager.catalog()
   assert.deepEqual(catalog.plans[0]?.cases, ['CASE_FIXTURE'])
@@ -590,6 +636,7 @@ try {
   assert.equal(finalStatus.runs[0]?.record.state, 'completed')
   assert.equal(finalStatus.runs[0]?.record.exitCode, 0)
   assert.ok(finalStatus.runs[0]?.observedSources.every(source => source.rootExists === true))
+  assert.ok(await stat(join(startedRun.runRoot, 'completion.marker')))
   assert.deepEqual(await readdir(join(templateRoot, 'logs', 'codex')), [])
   assert.deepEqual(await readdir(join(templateRoot, 'logs', 'claude')), [])
   const registrations = await loadRuntimeRegistrations(registrationRoot)
@@ -598,6 +645,34 @@ try {
   const combined = await loadCombinedLiveManifest(baseManifestPath, registrationRoot)
   assert.equal(combined.sources.length, 2)
   assert.ok(combined.sources.every(source => source.root.startsWith(startedRun.runRoot)))
+
+  const falseSuccessRun = await launchManager.start({
+    plan_id: 'fixture-no-output',
+    case_id: 'CASE_FIXTURE',
+    confirmation: 'START_EXTERNAL_PREEXPERIMENT',
+  })
+  let falseSuccessStatus = await launchManager.status({ run_id: falseSuccessRun.runId })
+  for (let attempt = 0; attempt < 200 && !falseSuccessStatus.runs[0]?.terminalStateVerified; attempt += 1) {
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 25))
+    falseSuccessStatus = await launchManager.status({ run_id: falseSuccessRun.runId })
+  }
+  assert.equal(falseSuccessStatus.runs[0]?.record.state, 'failed')
+  assert.match(falseSuccessStatus.runs[0]?.record.error ?? '', /completion artifact/)
+
+  if (process.platform === 'win32') {
+    const windowsPowerShellRun = await launchManager.start({
+      plan_id: 'fixture-windows-powershell',
+      case_id: 'CASE_FIXTURE',
+      confirmation: 'START_EXTERNAL_PREEXPERIMENT',
+    })
+    let windowsPowerShellStatus = await launchManager.status({ run_id: windowsPowerShellRun.runId })
+    for (let attempt = 0; attempt < 200 && !windowsPowerShellStatus.runs[0]?.terminalStateVerified; attempt += 1) {
+      await new Promise(resolveDelay => setTimeout(resolveDelay, 25))
+      windowsPowerShellStatus = await launchManager.status({ run_id: windowsPowerShellRun.runId })
+    }
+    assert.equal(windowsPowerShellStatus.runs[0]?.record.state, 'completed')
+    assert.ok(await stat(join(windowsPowerShellRun.runRoot, 'powershell-completion.marker')))
+  }
 } finally {
   await rm(launchFixtureRoot, { recursive: true, force: true })
 }
@@ -639,6 +714,8 @@ const report = {
     managedLaunchRegistersSourcesBeforeObservation: true,
     managedLaunchRunsOnlySyntheticSupervisor: true,
     managedLaunchSerializesAcrossPlans: true,
+    managedLaunchCompletionArtifactGuardValidated: true,
+    managedLaunchWindowsPowerShellValidated: process.platform === 'win32',
   },
 }
 

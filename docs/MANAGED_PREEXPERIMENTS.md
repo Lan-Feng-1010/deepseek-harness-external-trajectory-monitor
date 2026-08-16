@@ -29,10 +29,14 @@ provider, model, prompt, tools or baseline.
 5. It expands source paths, verifies that they stay inside the fresh run root,
    and writes an atomic runtime-registration descriptor.
 6. It writes an initial managed-run record and directly spawns the predeclared
-   executable with `shell: false`.
+   executable with `shell: false`. On Windows, the child is deliberately not
+   created with Node's detached-process flag because detached Windows
+   PowerShell 5.1 can return zero without executing the requested script.
 7. The live monitor hot-loads the registration and projects complete JSONL
    lines as they appear.
-8. `external_preexperiment_status` reports launcher state and source-root
+8. After process exit, every optional `completionPaths` entry must exist under
+   the fresh run root before an exit code of zero is accepted as `completed`.
+9. `external_preexperiment_status` reports launcher state and source-root
    presence. The append-only JSONL and normalized ledger remain the evidence for
    actual external-agent behavior.
 
@@ -52,6 +56,11 @@ Every expanded source root, working directory and ledger root must stay inside
 required files or non-empty template runtime directories are rejected before a
 child process starts.
 
+`completionPaths` is an optional array of safe paths relative to `{run_root}`.
+Use it for supervisor-written terminal summaries or completion markers. A
+zero-exit launcher that produces none of the declared artifacts is recorded as
+`failed`, preventing a wrapper no-op from being reported as a successful run.
+
 Use separate enabled plans for Codex-only, Claude-only, ImplantAgent-only and
 any reviewed fixed sequence. These are choices, not prerequisites: one agent's
 plan does not gate another. Arbitrary ordering is supported by starting a
@@ -68,7 +77,8 @@ case ID to the protected operational plan.
 
 ## Interpretation limits
 
-- `running`, `completed` and `failed` describe the trusted supervisor process.
+- `running`, `completed` and `failed` describe the trusted supervisor process;
+  `completed` also requires all configured completion artifacts.
 - Tool success does not establish clinical correctness.
 - JSONL synchronization delay is not model latency.
 - Hidden chain-of-thought is neither available nor reconstructed.

@@ -196,6 +196,8 @@ function validatePlan(raw: unknown, index: number): LaunchPlan {
       .map((item, pathIndex) => requireSafeRelativePath(item, `${label}.requiredPaths[${pathIndex}]`)),
     requiredEmptyDirectories: requireStringArray(value.requiredEmptyDirectories ?? [], `${label}.requiredEmptyDirectories`)
       .map((item, pathIndex) => requireSafeRelativePath(item, `${label}.requiredEmptyDirectories[${pathIndex}]`)),
+    completionPaths: requireStringArray(value.completionPaths ?? [], `${label}.completionPaths`)
+      .map((item, pathIndex) => requireSafeRelativePath(item, `${label}.completionPaths[${pathIndex}]`)),
     cases,
     command: {
       executable: requireAbsolute(command.executable, `${label}.command.executable`),
@@ -278,6 +280,16 @@ function processAlive(pid: number | null): boolean | null {
   } catch {
     return false
   }
+}
+
+async function missingCompletionPaths(runRoot: string, completionPaths: readonly string[]): Promise<string[]> {
+  const missing: string[] = []
+  for (const relativePath of completionPaths) {
+    const candidate = resolve(runRoot, relativePath)
+    if (!isInside(runRoot, candidate)) throw new Error(`completion path escaped run root: ${relativePath}`)
+    if (!(await pathExists(candidate))) missing.push(relativePath)
+  }
+  return missing
 }
 
 async function loadRunRecords(root: string): Promise<ManagedRunRecord[]> {
@@ -471,7 +483,10 @@ export class PreexperimentLaunchManager {
       try {
         child = spawn(executable, commandArgs, {
           cwd: commandCwd,
-          detached: true,
+          // Node's detached Windows launch can make Windows PowerShell 5.1
+          // return 0 without executing the requested script. A non-detached
+          // child can still be unref'ed and remains independently observable.
+          detached: process.platform !== 'win32',
           shell: false,
           windowsHide: true,
           stdio: ['ignore', stdout.fd, stderr.fd],
@@ -495,16 +510,34 @@ export class PreexperimentLaunchManager {
         void writeJsonAtomic(recordPath, failed)
       })
       child.once('exit', (code, signal) => {
-        const finished: ManagedRunRecord = {
-          ...record,
-          state: code === 0 ? 'completed' : 'failed',
-          updatedAt: new Date().toISOString(),
-          exitCode: code,
-          signal,
-          error: code === 0 ? null : `trusted supervisor exited with ${code ?? signal ?? 'unknown status'}`,
-        }
         this.activeRuns.delete(runId)
-        void writeJsonAtomic(recordPath, finished)
+        void (async () => {
+          const missing = code === 0 ? await missingCompletionPaths(runRoot, plan.completionPaths) : []
+          const completed = code === 0 && missing.length === 0
+          const finished: ManagedRunRecord = {
+            ...record,
+            state: completed ? 'completed' : 'failed',
+            updatedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            error: completed
+              ? null
+              : code === 0
+                ? `trusted supervisor exited with 0 but completion artifact(s) are missing: ${missing.join(', ')}`
+                : `trusted supervisor exited with ${code ?? signal ?? 'unknown status'}`,
+          }
+          await writeJsonAtomic(recordPath, finished)
+        })().catch(error => {
+          const failed: ManagedRunRecord = {
+            ...record,
+            state: 'failed',
+            updatedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            error: `could not verify trusted supervisor completion: ${error instanceof Error ? error.message : String(error)}`,
+          }
+          void writeJsonAtomic(recordPath, failed)
+        })
       })
       return record
     } finally {

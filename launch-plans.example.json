@@ -18,6 +18,9 @@
         "output_codex",
         "output_claude"
       ],
+      "completionPaths": [
+        "supervisor_control\\sequential_supervisor_summary.json"
+      ],
       "cases": [
         {
           "caseId": "CASE_001",

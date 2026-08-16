@@ -2,7 +2,7 @@
 
 DeepSeek Harness's universal external-agent launch and real-time trajectory monitoring plugin. It can passively observe any registered append-only JSONL source, or—when explicitly enabled—ask for human approval and start a preconfigured trusted supervisor. It projects public events into Harness's native Trajectory UI and generates a comparable append-only normalized ledger. Codex and Claude use built-in adapters; other agents use the unified `external-agent-event-v1` protocol.
 
-Current plugin version: `0.6.1`<br>
+Current plugin version: `0.6.2`<br>
 Native real-time projection version: `4.3.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
@@ -115,12 +115,14 @@ Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
 
-Version `0.6.1` uses TypeScript authoring for both Host and Client. Harness still
+Version `0.6.2` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
 `trajectory_stats` tool and SessionEvent projection remain compatible. Version
-`0.6.1` adds optional managed external preexperiment tools and globally
-serializes managed runs across plans, while preserving
-repeated logical call IDs, the generic adapter and ledger schema v3.
+`0.6.2` adds optional managed external preexperiment tools, globally serializes
+managed runs across plans, uses a Windows-safe non-detached process launch, and
+can require explicit completion artifacts before an exit code of zero is
+reported as completed. It preserves repeated logical call IDs, the generic
+adapter and ledger schema v3.
 
 Relevant upstream documents:
 
@@ -330,7 +332,8 @@ Request-to-Tool order is shown in this session's observable trajectory view.
 - Hidden chain-of-thought is intentionally unavailable and must not be
   reconstructed.
 - A managed launcher state of `completed` means the trusted supervisor process
-  exited successfully; it does not establish clinical or scientific success.
+  exited successfully and every configured `completionPaths` artifact exists;
+  it does not establish clinical or scientific success.
 
 ## Security and data handling
 
