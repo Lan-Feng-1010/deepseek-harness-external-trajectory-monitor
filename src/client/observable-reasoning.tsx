@@ -137,7 +137,7 @@ function safeNativeText(value: unknown): string {
   return (encoded ?? '')
     .replace(/((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|authorization)\s*[=:]\s*)([^\s,;]+)/gi, '$1[REDACTED]')
     .replace(/("(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|authorization)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\x2f-]+=*/gi, '$1[REDACTED]')
 }
 
 function nativePreview(value: unknown, limit = 280): string {
@@ -158,7 +158,7 @@ function buildNativeTrace(snapshot: ConversationSnapshot): ObservableTrace {
           events.push({
             seq: 0, sortSeq: node.seq + blockIndex / 1000, kind: 'private_reasoning_marker', phase,
             timestampMs: node.time, timeEvidence: 'harness-event', sourceLine: node.seq,
-            messageId: node.messageId, contentOmitted: true,
+            ...(node.messageId === undefined ? {} : { messageId: String(node.messageId) }), contentOmitted: true,
             label: '私有 reasoning 事件（内容不可见）',
           })
         } else if (block.kind === 'text' && block.text.trim() !== '') {
@@ -167,7 +167,7 @@ function buildNativeTrace(snapshot: ConversationSnapshot): ObservableTrace {
           events.push({
             seq: 0, sortSeq: node.seq + blockIndex / 1000, kind: 'public_reasoning', phase,
             timestampMs: node.time, timeEvidence: 'harness-event', sourceLine: node.seq,
-            messageId: node.messageId, text: publicContext, preview: nativePreview(publicContext),
+            ...(node.messageId === undefined ? {} : { messageId: String(node.messageId) }), text: publicContext, preview: nativePreview(publicContext),
           })
         } else if (block.kind === 'tool-call') {
           const argumentsText = safeNativeText(block.argsRaw)

@@ -4,6 +4,44 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type {
+  EventLog,
+  HarnessContext,
+  HarnessSession,
+  HistoricalContext,
+  HistoricalSource,
+  ImportReport,
+  JsonObject,
+  JsonlDocument,
+  JsonlRecord,
+  LatestLiveFile,
+  LedgerFields,
+  LiveManifest,
+  LiveSource,
+  MonitorStatsArgs,
+  NativeLiveState,
+  NormalizedLedgerRecord,
+  ObservableTrace,
+  ObservableTraceEvent,
+  PluginConfig,
+  RunRecord,
+  SourceManifest,
+  ToolAuditMetadata,
+} from './types.ts'
+
+export type {
+  HistoricalSource,
+  JsonlRecord,
+  LedgerFields,
+  LiveSource,
+  MonitorStatsArgs,
+  NativeLiveState,
+  NormalizedLedgerRecord,
+  ObservableTrace,
+  ObservableTraceEvent,
+  PluginConfig,
+  SourceManifest,
+} from './types.ts'
 
 export const name = 'external-trajectory-importer'
 export const inject = ['sessions', 'sessionPersistence', 'webServer', 'tools']
@@ -43,38 +81,38 @@ const IMPLANTAGENT_TOOLS = Object.freeze({
   t13_output_package: { nodeId: 'T13', moduleId: 'M6', title: '输出封装 / Output package' },
 })
 
-function requireNonEmptyString(value, label) {
+function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`${label} must be a non-empty string`)
   }
   return value
 }
 
-function parseEpoch(value, label) {
+function parseEpoch(value: unknown, label: string): number {
   const result = Date.parse(requireNonEmptyString(value, label))
   if (!Number.isSafeInteger(result) || result < 0) throw new Error(`${label} is not a valid timestamp`)
   return result
 }
 
-function eventTime(value, fallback) {
+function eventTime(value: unknown, fallback: number): number {
   if (typeof value !== 'string') return fallback
   const result = Date.parse(value)
   return Number.isSafeInteger(result) && result >= 0 ? result : fallback
 }
 
-function safeTokenCount(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+function safeTokenCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
-function sanitizeId(value) {
+function sanitizeId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-function sha256Text(text) {
+function sha256Text(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-async function readJson(path, label) {
+async function readJson(path: string, label: string): Promise<JsonObject> {
   const text = await readFile(path, 'utf8')
   try {
     return JSON.parse(text)
@@ -83,13 +121,14 @@ async function readJson(path, label) {
   }
 }
 
-async function readJsonl(path) {
+async function readJsonl(path: string): Promise<JsonlDocument> {
   const text = await readFile(path, 'utf8')
-  const records = []
-  const malformedLines = []
+  const records: JsonlRecord[] = []
+  const malformedLines: number[] = []
   const lines = text.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
+    if (line === undefined) continue
     if (line.trim() === '') continue
     try {
       records.push({ line: index + 1, value: JSON.parse(line) })
@@ -100,11 +139,11 @@ async function readJsonl(path) {
   return { text, records, malformedLines }
 }
 
-function validateSource(source, index) {
+function validateSource(source: JsonObject, index: number): HistoricalSource {
   if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error(`sessions[${index}] must be an object`)
   }
-  const agent = requireNonEmptyString(source.agent, `sessions[${index}].agent`)
+  const agent = requireNonEmptyString(source.agent, `sessions[${index}].agent`) as HistoricalSource['agent']
   if (agent !== 'codex' && agent !== 'claude') {
     throw new Error(`sessions[${index}].agent must be "codex" or "claude"`)
   }
@@ -128,7 +167,7 @@ function validateSource(source, index) {
   return checked
 }
 
-export async function loadManifest(path = DEFAULT_MANIFEST_PATH) {
+export async function loadManifest(path = DEFAULT_MANIFEST_PATH): Promise<SourceManifest> {
   const manifest = await readJson(path, 'trajectory source manifest')
   if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.sessions)) {
     throw new Error('trajectory source manifest must use schemaVersion 1 and contain a sessions array')
@@ -136,11 +175,11 @@ export async function loadManifest(path = DEFAULT_MANIFEST_PATH) {
   return { schemaVersion: 1, sessions: manifest.sessions.map(validateSource) }
 }
 
-function validateLiveSource(source, index) {
+function validateLiveSource(source: JsonObject, index: number): LiveSource {
   if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error(`live sources[${index}] must be an object`)
   }
-  const kind = requireNonEmptyString(source.kind, `live sources[${index}].kind`)
+  const kind = requireNonEmptyString(source.kind, `live sources[${index}].kind`) as LiveSource['kind']
   if (!['codex', 'claude', 'implantagent-trace'].includes(kind)) {
     throw new Error(`live sources[${index}].kind is unsupported`)
   }
@@ -171,7 +210,7 @@ function validateLiveSource(source, index) {
   }
 }
 
-export async function loadLiveManifest(path = DEFAULT_LIVE_MANIFEST_PATH) {
+export async function loadLiveManifest(path = DEFAULT_LIVE_MANIFEST_PATH): Promise<LiveManifest> {
   const manifest = await readJson(path, 'live trajectory source manifest')
   if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.sources)) {
     throw new Error('live trajectory source manifest must use schemaVersion 1 and contain a sources array')
@@ -179,8 +218,8 @@ export async function loadLiveManifest(path = DEFAULT_LIVE_MANIFEST_PATH) {
   return { schemaVersion: 1, sources: manifest.sources.map(validateLiveSource) }
 }
 
-function makeEventLog() {
-  const events = []
+function makeEventLog(): EventLog {
+  const events: EventLog['events'] = []
   return {
     append(type, time, data, envelope = {}) {
       const event = { type, seq: events.length, time, data, ...envelope }
@@ -191,11 +230,11 @@ function makeEventLog() {
   }
 }
 
-function messageId(sessionId, label, ordinal) {
+function messageId(sessionId: string, label: string, ordinal: number): string {
   return `${sessionId}-${label}-${ordinal}`
 }
 
-function appendImportNotice(log, context, time) {
+function appendImportNotice(log: EventLog, context: HistoricalContext, time: number): void {
   const text = [
     `Imported read-only ${context.source.agent} CLI trajectory for ${context.source.caseId}.`,
     `Source: ${context.source.sourcePath}`,
@@ -220,7 +259,7 @@ function appendImportNotice(log, context, time) {
   })
 }
 
-function appendAssistant(log, context, position, time, content, ordinal, usage) {
+function appendAssistant(log: EventLog, context: HistoricalContext, position: JsonObject, time: number, content: JsonObject[], ordinal: number, usage?: JsonObject): void {
   const data = {
     turn: position.turn,
     step: position.step,
@@ -239,7 +278,7 @@ function appendAssistant(log, context, position, time, content, ordinal, usage) 
   log.append('assistant/message', time, data, { surfaceOp: 'append' })
 }
 
-function appendTool(log, context, position, call, result) {
+function appendTool(log: EventLog, context: HistoricalContext, position: JsonObject, call: JsonObject, result: JsonObject): void {
   const callSeq = log.append('tool/call', call.time, {
     turn: position.turn,
     step: position.step,
@@ -272,14 +311,14 @@ function appendTool(log, context, position, call, result) {
   }, { surfaceOp: 'append', sourceEventSeqs: [callSeq] })
 }
 
-function createStepController(log, turn) {
+function createStepController(log: EventLog, turn: number) {
   let step = 0
   let open = false
   return {
     get position() {
       return { turn, step }
     },
-    ensure(time) {
+    ensure(time: number) {
       if (!open) {
         step += 1
         log.append('step/start', time, { turn, step })
@@ -287,7 +326,7 @@ function createStepController(log, turn) {
       }
       return { turn, step }
     },
-    close(time) {
+    close(time: number) {
       if (!open) return
       log.append('step/end', time, { turn, step })
       open = false
@@ -301,7 +340,7 @@ function createStepController(log, turn) {
   }
 }
 
-function codexToolArguments(item) {
+function codexToolArguments(item: JsonObject): string {
   switch (item.type) {
     case 'command_execution':
       return JSON.stringify({ command: item.command })
@@ -316,7 +355,7 @@ function codexToolArguments(item) {
   }
 }
 
-function codexToolResult(item) {
+function codexToolResult(item: JsonObject): string {
   if (item.type === 'command_execution') return typeof item.aggregated_output === 'string' ? item.aggregated_output : ''
   if (item.type === 'mcp_tool_call') {
     if (item.result !== undefined) return JSON.stringify(item.result)
@@ -325,14 +364,14 @@ function codexToolResult(item) {
   return JSON.stringify(item)
 }
 
-function codexRawToolName(item) {
+function codexRawToolName(item: JsonObject): string {
   if (item.type === 'mcp_tool_call') return `mcp__${String(item.server ?? '')}__${String(item.tool ?? '')}`
   return item.type
 }
 
-function implantagentToolMetadata(item) {
+function implantagentToolMetadata(item: JsonObject): JsonObject | null {
   if (item?.type !== 'mcp_tool_call' || item.server !== 'implantagent') return null
-  const metadata = IMPLANTAGENT_TOOLS[item.tool]
+  const metadata = (IMPLANTAGENT_TOOLS as Record<string, { nodeId: string; moduleId: string; title: string }>)[String(item.tool)]
   if (metadata === undefined) return null
   return {
     ...metadata,
@@ -341,18 +380,18 @@ function implantagentToolMetadata(item) {
   }
 }
 
-function codexCommandText(item) {
+function codexCommandText(item: JsonObject): string {
   if (typeof item?.command === 'string') return item.command
-  if (Array.isArray(item?.command)) return item.command.map(value => String(value)).join(' ')
+  if (Array.isArray(item?.command)) return item.command.map((value: unknown) => String(value)).join(' ')
   return ''
 }
 
-function pathLeaf(value) {
+function pathLeaf(value: string): string {
   const parts = value.split(/[\\/]/)
   return parts.at(-1) || value
 }
 
-function codexToolDisplayName(item) {
+function codexToolDisplayName(item: JsonObject): string {
   if (item.type === 'mcp_tool_call') return codexRawToolName(item)
   if (item.type !== 'command_execution') return item.type
   const command = codexCommandText(item)
@@ -371,7 +410,7 @@ function codexToolDisplayName(item) {
   return 'command_execution'
 }
 
-const ERROR_CATEGORY_LABELS = {
+const ERROR_CATEGORY_LABELS: Record<string, string> = {
   missing_dependency: '缺少运行依赖',
   schema_validation: 'Schema 校验失败',
   data_contract: '数据契约/键缺失',
@@ -381,7 +420,7 @@ const ERROR_CATEGORY_LABELS = {
   tool_error: '工具执行失败',
 }
 
-function classifyToolError(event) {
+function classifyToolError(event: JsonObject): { category: string; categoryLabel: string } {
   const evidence = `${event.arguments ?? ''}\n${event.result ?? ''}`.toLowerCase()
   let category = 'tool_error'
   if (/modulenotfounderror|no module named|cannot find module/.test(evidence)) category = 'missing_dependency'
@@ -390,10 +429,10 @@ function classifyToolError(event) {
   else if (/jq:\s*error|jq(?:\.exe)?[^\n]*(?:syntax|compile) error/.test(evidence) || event.toolName === 'jq') category = 'jq_quoting'
   else if (/traceback \(most recent call last\)|\b(?:type|value|attribute|index|runtime)error\b/.test(evidence)) category = 'python_runtime'
   else if (event.exitCode !== null && event.exitCode !== undefined && event.exitCode !== 0) category = 'shell_nonzero'
-  return { category, categoryLabel: ERROR_CATEGORY_LABELS[category] }
+  return { category, categoryLabel: ERROR_CATEGORY_LABELS[category] ?? ERROR_CATEGORY_LABELS.tool_error ?? '工具执行失败' }
 }
 
-function buildCodexEvents(context, records, malformedLines, runRecord) {
+function buildCodexEvents(context: HistoricalContext, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord) {
   const startedAt = parseEpoch(runRecord.started_at_utc, 'Codex run started_at_utc')
   const finishedAt = parseEpoch(runRecord.finished_at_utc, 'Codex run finished_at_utc')
   const log = makeEventLog()
@@ -423,7 +462,7 @@ function buildCodexEvents(context, records, malformedLines, runRecord) {
     if (item === null || typeof item !== 'object') continue
 
     if (item.type === 'todo_list' && Array.isArray(item.items)) {
-      const todos = item.items.map(entry => ({
+      const todos = item.items.map((entry: JsonObject) => ({
         content: typeof entry?.text === 'string' ? entry.text : JSON.stringify(entry),
         status: entry?.completed === true ? 'completed' : 'pending',
       }))
@@ -490,13 +529,14 @@ function buildCodexEvents(context, records, malformedLines, runRecord) {
   }
 }
 
-function claudeUsage(usage) {
+function claudeUsage(usage: unknown): JsonObject | undefined {
   if (usage === null || typeof usage !== 'object') return undefined
-  const inputTokens = safeTokenCount(usage.input_tokens)
-  const outputTokens = safeTokenCount(usage.output_tokens)
+  const value = usage as JsonObject
+  const inputTokens = safeTokenCount(value.input_tokens)
+  const outputTokens = safeTokenCount(value.output_tokens)
   if (inputTokens === undefined || outputTokens === undefined) return undefined
-  const cacheReadTokens = safeTokenCount(usage.cache_read_input_tokens)
-  const cacheWriteTokens = safeTokenCount(usage.cache_creation_input_tokens)
+  const cacheReadTokens = safeTokenCount(value.cache_read_input_tokens)
+  const cacheWriteTokens = safeTokenCount(value.cache_creation_input_tokens)
   return {
     inputTokens,
     outputTokens,
@@ -505,22 +545,28 @@ function claudeUsage(usage) {
   }
 }
 
-function claudeResultText(content) {
+function claudeResultText(content: unknown): string {
   return typeof content === 'string' ? content : JSON.stringify(content)
 }
 
-function buildClaudeEvents(context, records, malformedLines, runRecord) {
+function buildClaudeEvents(context: HistoricalContext, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord) {
   const startedAt = parseEpoch(runRecord.started_at_utc, 'Claude run started_at_utc')
   const finishedAt = parseEpoch(runRecord.finished_at_utc, 'Claude run finished_at_utc')
   const log = makeEventLog()
   const turn = 1
   const steps = createStepController(log, turn)
-  let pendingAssistant
+  let pendingAssistant: {
+    id: string
+    time: number
+    content: JsonObject[]
+    tools: JsonObject[]
+    usage: JsonObject | undefined
+  } | undefined
   let assistantOrdinal = 0
   let resultOrdinal = 0
   let sourceCompleted = false
-  const openCalls = new Map()
-  const assistantMessageIds = new Set()
+  const openCalls = new Map<string, number>()
+  const assistantMessageIds = new Set<string>()
   const counts = {
     assistantMessages: 0,
     visibleAssistantTextBlocks: 0,
@@ -537,12 +583,12 @@ function buildClaudeEvents(context, records, malformedLines, runRecord) {
   log.append('turn/start', startedAt, { turn })
   appendImportNotice(log, context, startedAt)
 
-  function closeStep(time) {
+  function closeStep(time: number): void {
     steps.close(time)
     openCalls.clear()
   }
 
-  function flushAssistant() {
+  function flushAssistant(): void {
     if (pendingAssistant === undefined) return
     const pending = pendingAssistant
     pendingAssistant = undefined
@@ -580,12 +626,14 @@ function buildClaudeEvents(context, records, malformedLines, runRecord) {
           usage: claudeUsage(event.message.usage),
         }
       }
-      pendingAssistant.usage = claudeUsage(event.message.usage) ?? pendingAssistant.usage
+      if (pendingAssistant === undefined) throw new Error('Claude assistant state was not initialized')
+      const currentAssistant = pendingAssistant
+      currentAssistant.usage = claudeUsage(event.message.usage) ?? currentAssistant.usage
       for (const block of Array.isArray(event.message.content) ? event.message.content : []) {
         if (block?.type === 'thinking') {
           counts.omittedHiddenReasoningEvents += 1
         } else if (block?.type === 'text' && typeof block.text === 'string') {
-          pendingAssistant.content.push({ type: 'text', text: block.text })
+          currentAssistant.content.push({ type: 'text', text: block.text })
           counts.visibleAssistantTextBlocks += 1
         } else if (block?.type === 'tool_use') {
           const toolId = requireNonEmptyString(block.id, `Claude tool_use at line ${record.line} id`)
@@ -596,13 +644,13 @@ function buildClaudeEvents(context, records, malformedLines, runRecord) {
             arguments: JSON.stringify(block.input ?? {}),
             time: eventTime(event.timestamp, startedAt),
           }
-          pendingAssistant.content.push({
+          currentAssistant.content.push({
             type: 'tool-call',
             id: tool.id,
             name: tool.name,
             arguments: tool.arguments,
           })
-          pendingAssistant.tools.push(tool)
+          currentAssistant.tools.push(tool)
         }
       }
       continue
@@ -706,30 +754,31 @@ function buildClaudeEvents(context, records, malformedLines, runRecord) {
   }
 }
 
-function exactEventTime(value) {
+function exactEventTime(value: unknown): number | null {
   if (typeof value !== 'string') return null
   const parsed = Date.parse(value)
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null
 }
 
-function redactObservableText(value) {
+function redactObservableText(value: unknown): string {
   const serialized = typeof value === 'string' ? value : JSON.stringify(value)
   const text = typeof serialized === 'string' ? serialized : String(value ?? '')
   return text
     .replace(/((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|authorization)\s*[=:]\s*)([^\s,;]+)/gi, '$1[REDACTED]')
     .replace(/("(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|authorization)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\x2f-]+=*/gi, '$1[REDACTED]')
 }
 
-function previewText(value, limit = 280) {
+function previewText(value: unknown, limit = 280): string {
   const normalized = redactObservableText(value).replace(/\s+/g, ' ').trim()
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`
 }
 
-function connectToolTransitions(events) {
+function connectToolTransitions(events: ObservableTraceEvent[]): ObservableTraceEvent[] {
   const tools = events.filter(event => event.kind === 'tool')
   for (let index = 0; index < tools.length; index += 1) {
     const current = tools[index]
+    if (current === undefined) continue
     const previous = tools[index - 1]
     const next = tools[index + 1]
     current.previousTool = previous?.toolName ?? null
@@ -740,11 +789,21 @@ function connectToolTransitions(events) {
       ? Math.max(0, current.timestampMs - previousEnd)
       : null
   }
-  for (let index = 0; index < events.length; index += 1) events[index].seq = index + 1
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index]
+    if (event !== undefined) event.seq = index + 1
+  }
   return tools
 }
 
-function makeObservableTrace(context, runRecord, malformedLines, timeCoverage, events, extraStats = {}) {
+function makeObservableTrace(
+  context: JsonObject,
+  runRecord: RunRecord,
+  malformedLines: readonly number[],
+  timeCoverage: string,
+  events: ObservableTraceEvent[],
+  extraStats: JsonObject = {},
+): ObservableTrace {
   const startedAtMs = parseEpoch(runRecord.started_at_utc, `${context.source.agent} run started_at_utc`)
   const finishedAtMs = parseEpoch(runRecord.finished_at_utc, `${context.source.agent} run finished_at_utc`)
   const tools = connectToolTransitions(events)
@@ -784,9 +843,9 @@ function makeObservableTrace(context, runRecord, malformedLines, timeCoverage, e
   }
 }
 
-function buildCodexObservableTrace(context, records, malformedLines, runRecord) {
-  const events = []
-  const startedTools = new Map()
+function buildCodexObservableTrace(context: JsonObject, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord): ObservableTrace {
+  const events: ObservableTraceEvent[] = []
+  const startedTools = new Map<string, ObservableTraceEvent>()
   let publicContext = ''
   let phase = 0
   for (const record of records) {
@@ -795,7 +854,7 @@ function buildCodexObservableTrace(context, records, malformedLines, runRecord) 
     if (item === null || typeof item !== 'object') continue
     if (event.type === 'item.started' && TOOL_ITEM_TYPES.has(item.type) && typeof item.id === 'string') {
       const argumentsText = redactObservableText(codexToolArguments(item))
-      const observableTool = {
+      const observableTool: ObservableTraceEvent = {
         seq: 0,
         kind: 'tool',
         phase,
@@ -824,7 +883,7 @@ function buildCodexObservableTrace(context, records, malformedLines, runRecord) 
     }
     if (item.type === 'todo_list' && Array.isArray(item.items)) {
       phase += 1
-      const text = item.items.map(entry => `${entry?.completed === true ? '✓' : '○'} ${typeof entry?.text === 'string' ? entry.text : JSON.stringify(entry)}`).join('\n')
+      const text = item.items.map((entry: JsonObject) => `${entry?.completed === true ? '✓' : '○'} ${typeof entry?.text === 'string' ? entry.text : JSON.stringify(entry)}`).join('\n')
       events.push({
         seq: 0,
         kind: 'public_plan',
@@ -896,9 +955,9 @@ function buildCodexObservableTrace(context, records, malformedLines, runRecord) 
   })
 }
 
-function buildClaudeObservableTrace(context, records, malformedLines, runRecord) {
-  const events = []
-  const toolsById = new Map()
+function buildClaudeObservableTrace(context: JsonObject, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord): ObservableTrace {
+  const events: ObservableTraceEvent[] = []
+  const toolsById = new Map<string, ObservableTraceEvent>()
   let publicContext = ''
   let phase = 0
   let thinkingTokenEvents = 0
@@ -938,7 +997,7 @@ function buildClaudeObservableTrace(context, records, malformedLines, runRecord)
           const callId = requireNonEmptyString(block.id, `Claude tool_use at line ${record.line} id`)
           const toolName = requireNonEmptyString(block.name, `Claude tool_use at line ${record.line} name`)
           const argumentsText = redactObservableText(block.input ?? {})
-          const tool = {
+          const tool: ObservableTraceEvent = {
             seq: 0,
             kind: 'tool',
             phase,
@@ -989,19 +1048,19 @@ function buildClaudeObservableTrace(context, records, malformedLines, runRecord)
   })
 }
 
-function caseIdFromFilename(filename) {
+function caseIdFromFilename(filename: string): string {
   return filename.match(/C\d{2}_\d{4}/)?.[0] ?? filename.replace(/_events\.jsonl$/i, '').replace(/\.jsonl$/i, '')
 }
 
-async function latestLiveFile(source) {
+async function latestLiveFile(source: LiveSource): Promise<LatestLiveFile | null> {
   let entries
   try {
     entries = await readdir(source.root, { withFileTypes: true })
   } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') return null
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
     throw error
   }
-  const candidates = []
+  const candidates: LatestLiveFile[] = []
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(source.suffix)) continue
     const path = join(source.root, entry.name)
@@ -1012,7 +1071,7 @@ async function latestLiveFile(source) {
   return candidates[0] ?? null
 }
 
-function liveRunRecord(records, details) {
+function liveRunRecord(records: readonly JsonlRecord[], details: LatestLiveFile['details']): RunRecord {
   const exact = records.flatMap(record => {
     const value = exactEventTime(record.value?.timestamp ?? record.value?.started_at_utc)
     return value === null ? [] : [value]
@@ -1029,16 +1088,16 @@ function liveRunRecord(records, details) {
   }
 }
 
-export function nativeLiveSessionId(source, path, caseId) {
+export function nativeLiveSessionId(source: LiveSource, path: string, caseId: string): string {
   return `${SESSION_PREFIX}native-v3-2-${sanitizeId(source.id)}-${sanitizeId(caseId)}-${sha256Text(path).slice(0, 12)}`
 }
 
-function nativeLiveTitle(state, status = 'RUNNING') {
+function nativeLiveTitle(state: NativeLiveState, status = 'RUNNING'): string {
   return `[External ${state.source.label}] ${state.caseId} · ${status}`
 }
 
-export function initializeNativeLiveSession(session, source, path, caseId) {
-  const state = {
+export function initializeNativeLiveSession(session: HarnessSession, source: LiveSource, path: string, caseId: string): NativeLiveState {
+  const state: NativeLiveState = {
     session,
     sessionId: session.id,
     source,
@@ -1096,7 +1155,7 @@ export function initializeNativeLiveSession(session, source, path, caseId) {
   return state
 }
 
-function sourceTimestamp(event) {
+function sourceTimestamp(event: JsonObject) {
   const value = event?.timestamp ?? event?.started_at_utc ?? null
   const milliseconds = exactEventTime(value)
   return {
@@ -1105,7 +1164,12 @@ function sourceTimestamp(event) {
   }
 }
 
-function appendLedgerRecord(state, record, event, fields) {
+function appendLedgerRecord(
+  state: NativeLiveState,
+  record: JsonlRecord | null | undefined,
+  event: JsonObject,
+  fields: LedgerFields,
+): NormalizedLedgerRecord {
   const timestamp = sourceTimestamp(event)
   const row = {
     schema_version: NORMALIZED_LEDGER_SCHEMA,
@@ -1139,7 +1203,7 @@ function appendLedgerRecord(state, record, event, fields) {
   return row
 }
 
-function rotateNativeLiveStep(state) {
+function rotateNativeLiveStep(state: NativeLiveState): void {
   if (!state.stepOpen) return
   if (state.openCalls.size > 0) throw new Error('cannot rotate native live step with open tool calls')
   state.session.append('step/end', { turn: state.turn, step: state.step })
@@ -1150,7 +1214,13 @@ function rotateNativeLiveStep(state) {
   state.codexRequestToolBlocks = []
 }
 
-function appendNativeLiveAssistantContent(state, content, record, event, ledgerFields = null) {
+function appendNativeLiveAssistantContent(
+  state: NativeLiveState,
+  content: JsonObject[],
+  record: JsonlRecord | null,
+  event: JsonObject | null,
+  ledgerFields: LedgerFields | null = null,
+): void {
   if (!Array.isArray(content) || content.length === 0) return
   state.assistantOrdinal += 1
   state.session.append('assistant/message', {
@@ -1163,29 +1233,27 @@ function appendNativeLiveAssistantContent(state, content, record, event, ledgerF
       source: { kind: 'model', provider: state.source.provider, model: state.source.model },
     },
   }, { surfaceOp: 'append' })
-  if (ledgerFields !== null) appendLedgerRecord(state, record, event, ledgerFields)
+  if (ledgerFields !== null) appendLedgerRecord(state, record, event ?? {}, ledgerFields)
   state.stepHasAssistantRequest = true
 }
 
-function appendNativeLiveAssistant(state, text, record, event, messageId) {
-  if (typeof text !== 'string' || text === '') return
-  appendNativeLiveAssistantContent(state, [{ type: 'text', text }], record, event, {
-    event_type: 'assistant_message',
-    public_assistant_message: text,
-    status: 'completed',
-    tool_call_id: messageId ?? null,
-  })
-}
-
-function appendCodexPublicMessage(state, text, record, event, messageId) {
+function appendCodexPublicMessage(state: NativeLiveState, text: string, record: JsonlRecord, event: JsonObject, messageId: string | null): void {
   if (typeof text !== 'string' || text === '') return
   state.pendingCodexAssistants.push({ text, record, event, messageId })
   state.codexNextEventStartsStep = true
 }
 
-function linkNativeToolToAssistant(state, callId, toolName, argumentsText, record, event, label = null) {
+function linkNativeToolToAssistant(
+  state: NativeLiveState,
+  callId: string,
+  toolName: string,
+  argumentsText: string,
+  record: JsonlRecord,
+  event: JsonObject,
+  label: string | null = null,
+): void {
   if (state.assistantLinkedCalls.has(callId)) return
-  const content = []
+  const content: JsonObject[] = []
   if (!state.stepHasAssistantRequest && typeof label === 'string' && label !== '') {
     content.push({ type: 'text', text: label })
   }
@@ -1200,7 +1268,7 @@ function linkNativeToolToAssistant(state, callId, toolName, argumentsText, recor
   state.assistantLinkedCalls.add(callId)
 }
 
-function prepareCodexToolRequest(state, callId, toolName, argumentsText, record, event) {
+function prepareCodexToolRequest(state: NativeLiveState, callId: string, toolName: string, argumentsText: string, record: JsonlRecord, event: JsonObject): void {
   if (state.callSeqs.has(callId)) return
   if (state.codexNextEventStartsStep) {
     if (state.openCalls.size > 0) throw new Error('cannot start a new Codex request with an open tool call')
@@ -1239,7 +1307,14 @@ function prepareCodexToolRequest(state, callId, toolName, argumentsText, record,
   for (const block of state.codexRequestToolBlocks) state.assistantLinkedCalls.add(block.id)
 }
 
-function prepareImplantAgentModuleToolRequest(state, callId, item, argumentsText, record, event) {
+function prepareImplantAgentModuleToolRequest(
+  state: NativeLiveState,
+  callId: string,
+  item: JsonObject,
+  argumentsText: string,
+  record: JsonlRecord,
+  event: JsonObject,
+): { metadata: JsonObject; audit: ToolAuditMetadata } {
   const metadata = implantagentToolMetadata(item)
   if (metadata === null) {
     throw new Error(`unregistered ImplantAgent MCP tool cannot be assigned to M1-M6: ${codexRawToolName(item)}`)
@@ -1257,10 +1332,10 @@ function prepareImplantAgentModuleToolRequest(state, callId, item, argumentsText
   state.currentImplantAgentGroup = group
   const requestTitle = dryRun
     ? 'Preflight · 固定工具完整性检查（不属于 M1–M6 临床执行）'
-    : IMPLANTAGENT_MODULES[metadata.moduleId]
+    : IMPLANTAGENT_MODULES[metadata.moduleId as keyof typeof IMPLANTAGENT_MODULES]
   const invocationIndex = (state.implantAgentInvocationCounts.get(metadata.rawToolName) ?? 0) + 1
   state.implantAgentInvocationCounts.set(metadata.rawToolName, invocationIndex)
-  const audit = {
+  const audit: ToolAuditMetadata = {
     module_id: dryRun ? null : metadata.moduleId,
     node_id: metadata.nodeId,
     raw_tool_name: metadata.rawToolName,
@@ -1282,7 +1357,7 @@ function prepareImplantAgentModuleToolRequest(state, callId, item, argumentsText
   return { metadata, audit }
 }
 
-function flushCodexFinalPublicRequest(state) {
+function flushCodexFinalPublicRequest(state: NativeLiveState): void {
   if (state.pendingCodexAssistants.length === 0) return
   if (state.openCalls.size > 0) throw new Error('cannot flush final Codex public request with open tool calls')
   if (state.stepHasAssistantRequest) rotateNativeLiveStep(state)
@@ -1300,7 +1375,15 @@ function flushCodexFinalPublicRequest(state) {
   state.codexNextEventStartsStep = false
 }
 
-function ensureNativeLiveToolCall(state, callId, toolName, argumentsText, record, event, audit = {}) {
+function ensureNativeLiveToolCall(
+  state: NativeLiveState,
+  callId: string,
+  toolName: string,
+  argumentsText: string,
+  record: JsonlRecord,
+  event: JsonObject,
+  audit: ToolAuditMetadata = {},
+): number {
   const existing = state.callSeqs.get(callId)
   if (existing !== undefined) return existing
   const call = state.session.append('tool/call', {
@@ -1343,15 +1426,23 @@ function ensureNativeLiveToolCall(state, callId, toolName, argumentsText, record
   return call.seq
 }
 
-function flushDeferredNativeRequests(state) {
+function flushDeferredNativeRequests(state: NativeLiveState): void {
   if (state.openCalls.size > 0) return
   while (state.pendingClaudeAssistantEvents.length > 0 && state.openCalls.size === 0) {
     const pending = state.pendingClaudeAssistantEvents.shift()
-    processClaudeAssistantEvent(state, pending.record, pending.event)
+    if (pending !== undefined) processClaudeAssistantEvent(state, pending.record as JsonlRecord, pending.event as JsonObject)
   }
 }
 
-function appendNativeLiveToolResult(state, callId, text, isError, record, event, durationOverrideMs = null) {
+function appendNativeLiveToolResult(
+  state: NativeLiveState,
+  callId: string,
+  text: string,
+  isError: boolean,
+  record: JsonlRecord,
+  event: JsonObject,
+  durationOverrideMs: number | null = null,
+): void {
   if (state.completedCalls.has(callId)) return
   const callSeq = state.callSeqs.get(callId)
   if (callSeq === undefined) throw new Error(`live native result lacks call ${callId}`)
@@ -1380,7 +1471,7 @@ function appendNativeLiveToolResult(state, callId, text, isError, record, event,
   const measuredDuration = callMeta?.startedAtMs !== null && callMeta?.startedAtMs !== undefined && resultTimestamp.milliseconds !== null
     ? Math.max(0, resultTimestamp.milliseconds - callMeta.startedAtMs)
     : null
-  const duration = Number.isFinite(durationOverrideMs) && durationOverrideMs >= 0 ? durationOverrideMs : measuredDuration
+  const duration = durationOverrideMs !== null && Number.isFinite(durationOverrideMs) && durationOverrideMs >= 0 ? durationOverrideMs : measuredDuration
   appendLedgerRecord(state, record, event, {
     event_type: 'tool_result',
     tool_call_id: callId,
@@ -1400,7 +1491,7 @@ function appendNativeLiveToolResult(state, callId, text, isError, record, event,
   flushDeferredNativeRequests(state)
 }
 
-function processClaudeAssistantEvent(state, record, event) {
+function processClaudeAssistantEvent(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
   const rawMessageId = event?.message?.id ?? event?.request_id ?? `line-${record.line}`
   const messageId = String(rawMessageId)
   if (state.currentClaudeMessageId !== null && state.currentClaudeMessageId !== messageId) {
@@ -1412,9 +1503,9 @@ function processClaudeAssistantEvent(state, record, event) {
   }
   state.currentClaudeMessageId = messageId
   const blocks = Array.isArray(event.message.content) ? event.message.content : []
-  const assistantContent = []
-  const publicTexts = []
-  const toolCalls = []
+  const assistantContent: JsonObject[] = []
+  const publicTexts: string[] = []
+  const toolCalls: { callId: string; toolName: string; argumentsText: string }[] = []
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index]
     const blockKey = `${messageId}:${block?.type ?? 'unknown'}:${block?.id ?? index}:${sha256Text(JSON.stringify(block ?? null))}`
@@ -1446,9 +1537,9 @@ function processClaudeAssistantEvent(state, record, event) {
   }
 }
 
-function finalizeNativeLiveSession(state, succeeded, message, record, event) {
+function finalizeNativeLiveSession(state: NativeLiveState, succeeded: boolean, message: string, record: JsonlRecord, event: JsonObject): void {
   if (state.finalized) return
-  for (const callId of [...state.openCalls]) {
+  for (const callId of state.openCalls) {
     appendNativeLiveToolResult(
       state,
       callId,
@@ -1491,7 +1582,7 @@ function finalizeNativeLiveSession(state, succeeded, message, record, event) {
   state.finalized = true
 }
 
-export function appendNativeLiveRecords(state, records) {
+export function appendNativeLiveRecords(state: NativeLiveState, records: readonly JsonlRecord[]): number {
   let appended = 0
   for (const record of records) {
     if (state.processedLines.has(record.line)) continue
@@ -1514,7 +1605,7 @@ export function appendNativeLiveRecords(state, records) {
       if (item === null || typeof item !== 'object') continue
       if (item.type === 'todo_list' && Array.isArray(item.items)) {
         state.session.append('todo/write', {
-          todos: item.items.map(entry => ({
+          todos: item.items.map((entry: JsonObject) => ({
             content: typeof entry?.text === 'string' ? entry.text : JSON.stringify(entry),
             status: entry?.completed === true ? 'completed' : 'pending',
           })),
@@ -1589,16 +1680,16 @@ export function appendNativeLiveRecords(state, records) {
   return appended
 }
 
-export function unflushedNativeLedgerRecords(state) {
+export function unflushedNativeLedgerRecords(state: NativeLiveState): NormalizedLedgerRecord[] {
   return state.ledgerRecords.slice(state.ledgerFlushedCount)
 }
 
-export function markNativeLedgerFlushed(state) {
+export function markNativeLedgerFlushed(state: NativeLiveState): void {
   state.ledgerFlushedCount = state.ledgerRecords.length
 }
 
-function buildImplantAgentToolTrace(context, records, malformedLines, runRecord) {
-  const events = []
+function buildImplantAgentToolTrace(context: JsonObject, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord): ObservableTrace {
+  const events: ObservableTraceEvent[] = []
   for (const record of records) {
     const row = record.value
     if (row?.schema_version !== 'implantagent-tool-trace-v1') continue
@@ -1656,7 +1747,7 @@ function buildImplantAgentToolTrace(context, records, malformedLines, runRecord)
   })
 }
 
-function emptyLiveMonitorTrace(liveSources) {
+function emptyLiveMonitorTrace(liveSources: readonly LiveSource[]): ObservableTrace {
   const now = Date.now()
   return {
     schemaVersion: 1,
@@ -1682,10 +1773,16 @@ function emptyLiveMonitorTrace(liveSources) {
   }
 }
 
-export async function buildLiveMonitorTrace(liveManifest) {
+export async function buildLiveMonitorTrace(liveManifest: LiveManifest): Promise<ObservableTrace> {
   const sources = liveManifest.sources
   const output = emptyLiveMonitorTrace(sources)
-  const traces = []
+  const traces: {
+    source: LiveSource
+    latest: LatestLiveFile
+    trace: ObservableTrace
+    isLive: boolean
+    caseId: string
+  }[] = []
   for (const source of sources) {
     const latest = await latestLiveFile(source)
     if (latest === null) continue
@@ -1724,7 +1821,7 @@ export async function buildLiveMonitorTrace(liveManifest) {
   events.forEach((event, index) => { event.seq = index + 1 })
   const startedAtMs = Math.min(...traces.map(item => item.trace.run.startedAtMs))
   const finishedAtMs = Math.max(...traces.map(item => item.trace.run.finishedAtMs))
-  const sum = key => traces.reduce((total, item) => total + Number(item.trace.stats[key] ?? 0), 0)
+  const sum = (key: string): number => traces.reduce((total, item) => total + Number(item.trace.stats[key] ?? 0), 0)
   return {
     ...output,
     caseId: `实时监视 · ${traces.length} 条最新运行`,
@@ -1761,9 +1858,12 @@ export async function buildLiveMonitorTrace(liveManifest) {
     errorComparison: traces.map(item => {
       const tools = item.trace.events.filter(event => event.kind === 'tool')
       const errors = tools.filter(event => event.status === 'error')
-      const counts = new Map()
-      const categoryCounts = new Map()
-      for (const event of errors) counts.set(event.toolName, (counts.get(event.toolName) ?? 0) + 1)
+      const counts = new Map<string, number>()
+      const categoryCounts = new Map<string, number>()
+      for (const event of errors) {
+        const toolName = event.toolName ?? event.rawToolName ?? 'unknown'
+        counts.set(toolName, (counts.get(toolName) ?? 0) + 1)
+      }
       for (const event of errors) {
         const classified = event.errorCategory === undefined ? classifyToolError(event) : {
           category: event.errorCategory,
@@ -1774,14 +1874,14 @@ export async function buildLiveMonitorTrace(liveManifest) {
         categoryCounts.set(classified.categoryLabel, (categoryCounts.get(classified.categoryLabel) ?? 0) + 1)
       }
       const first = errors[0]
-      const recoveryDistances = []
+      const recoveryDistances: number[] = []
       for (const error of errors) {
         const errorIndex = tools.indexOf(error)
         const recoveryIndex = tools.findIndex((candidate, index) => index > errorIndex && candidate.toolName === error.toolName && candidate.status === 'success')
         if (recoveryIndex >= 0) recoveryDistances.push(recoveryIndex - errorIndex)
       }
       const workflowNodes = new Set(tools.flatMap(event => typeof event.workflowNodeId === 'string' && event.workflowNodeId !== '' ? [event.workflowNodeId] : []))
-      const diagnostic = event => ({
+      const diagnostic = (event: ObservableTraceEvent) => ({
         toolName: event.toolName,
         rawToolName: event.rawToolName,
         errorCategory: event.errorCategory,
@@ -1820,17 +1920,17 @@ export async function buildLiveMonitorTrace(liveManifest) {
   }
 }
 
-export function buildMonitorStats(trace, rawArgs = {}) {
+export function buildMonitorStats(trace: ObservableTrace, rawArgs: MonitorStatsArgs = {}): JsonObject {
   if (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
     throw new Error('trajectory_stats arguments must be an object')
   }
-  const args = rawArgs
+  const args: MonitorStatsArgs = rawArgs
   for (const key of Object.keys(args)) {
     if (!['agent', 'case_id', 'tool_name', 'include_errors'].includes(key)) {
       throw new Error(`trajectory_stats does not accept argument ${key}`)
     }
   }
-  for (const key of ['agent', 'case_id', 'tool_name']) {
+  for (const key of ['agent', 'case_id', 'tool_name'] as const) {
     if (args[key] !== undefined && typeof args[key] !== 'string') {
       throw new Error(`${key} must be a string when provided`)
     }
@@ -1840,7 +1940,7 @@ export function buildMonitorStats(trace, rawArgs = {}) {
   }
 
   const selector = (args.agent ?? 'all').trim().toLowerCase()
-  const aliases = {
+  const aliases: Record<string, string> = {
     implantagent: 'implantagent-external',
     'implant-agent': 'implantagent-external',
     implantagent_external: 'implantagent-external',
@@ -1870,8 +1970,8 @@ export function buildMonitorStats(trace, rawArgs = {}) {
     const success = tools.filter(event => event.status === 'success')
     const errors = tools.filter(event => event.status === 'error')
     const pending = tools.filter(event => event.status === 'pending')
-    const toolCounts = new Map()
-    const categoryCounts = new Map()
+    const toolCounts = new Map<string, { toolName: string; calls: number; success: number; error: number; pending: number }>()
+    const categoryCounts = new Map<string, number>()
     for (const event of tools) {
       const toolName = event.toolName ?? event.rawToolName ?? 'unknown'
       const current = toolCounts.get(toolName) ?? { toolName, calls: 0, success: 0, error: 0, pending: 0 }
@@ -1889,7 +1989,7 @@ export function buildMonitorStats(trace, rawArgs = {}) {
       const label = classified.categoryLabel ?? classified.category
       categoryCounts.set(label, (categoryCounts.get(label) ?? 0) + 1)
     }
-    const recoveryDistances = []
+    const recoveryDistances: number[] = []
     for (const error of errors) {
       const errorIndex = tools.indexOf(error)
       const recoveryIndex = tools.findIndex((candidate, index) => index > errorIndex && candidate.toolName === error.toolName && candidate.status === 'success')
@@ -1950,26 +2050,34 @@ export function buildMonitorStats(trace, rawArgs = {}) {
   }
 }
 
-export function deriveSessionId(source, sha256) {
+export function deriveSessionId(source: HistoricalSource, sha256: string): string {
   return `${SESSION_PREFIX}${sanitizeId(source.agent)}-${sanitizeId(source.caseId)}-${sha256.slice(0, 12)}`
 }
 
-export function isImportedSessionId(sessionId) {
+export function isImportedSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === 'string' && sessionId.startsWith(SESSION_PREFIX)
 }
 
-export async function readonlyImportedSessionGuard({ agent }, next) {
+export async function readonlyImportedSessionGuard(
+  { agent }: { agent?: { session?: { id?: string } } },
+  next: () => unknown | Promise<unknown>,
+): Promise<unknown> {
   if (isImportedSessionId(agent?.session?.id)) return { kind: 'reject' }
   return next()
 }
 
-export async function prepareImport(source) {
+export async function prepareImport(source: HistoricalSource) {
   const jsonl = await readJsonl(source.sourcePath)
   const sha256 = sha256Text(jsonl.text)
   if (sha256 !== source.expectedSha256) {
     throw new Error(`source hash mismatch for ${source.sourcePath}: expected ${source.expectedSha256}, got ${sha256}`)
   }
-  const runRecord = await readJson(source.runRecordPath, `${source.agent} run record`)
+  const rawRunRecord = await readJson(source.runRecordPath, `${source.agent} run record`)
+  const runRecord: RunRecord = {
+    ...rawRunRecord,
+    started_at_utc: requireNonEmptyString(rawRunRecord.started_at_utc, `${source.agent} run started_at_utc`),
+    finished_at_utc: requireNonEmptyString(rawRunRecord.finished_at_utc, `${source.agent} run finished_at_utc`),
+  }
   const sessionId = deriveSessionId(source, sha256)
   const context = { source, sha256, sessionId }
   const converted = source.agent === 'codex'
@@ -1993,20 +2101,21 @@ export async function prepareImport(source) {
   }
 }
 
-function validateConfig(config) {
+function validateConfig(config: unknown): PluginConfig {
   if (config === undefined) return { manifestPath: DEFAULT_MANIFEST_PATH, liveManifestPath: DEFAULT_LIVE_MANIFEST_PATH }
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('external trajectory importer config must be an object')
   }
-  const manifestPath = config.manifestPath === undefined
+  const candidate = config as JsonObject
+  const manifestPath = candidate.manifestPath === undefined
     ? DEFAULT_MANIFEST_PATH
-    : requireNonEmptyString(config.manifestPath, 'manifestPath')
-  const liveManifestPath = config.liveManifestPath === undefined
+    : requireNonEmptyString(candidate.manifestPath, 'manifestPath')
+  const liveManifestPath = candidate.liveManifestPath === undefined
     ? DEFAULT_LIVE_MANIFEST_PATH
-    : requireNonEmptyString(config.liveManifestPath, 'liveManifestPath')
-  const reportPath = config.reportPath === undefined
+    : requireNonEmptyString(candidate.liveManifestPath, 'liveManifestPath')
+  const reportPath = candidate.reportPath === undefined
     ? undefined
-    : requireNonEmptyString(config.reportPath, 'reportPath')
+    : requireNonEmptyString(candidate.reportPath, 'reportPath')
   if (!isAbsolute(manifestPath) || !isAbsolute(liveManifestPath) || (reportPath !== undefined && !isAbsolute(reportPath))) {
     throw new Error('manifestPath, liveManifestPath and reportPath must be absolute when configured')
   }
@@ -2017,7 +2126,7 @@ function validateConfig(config) {
   }
 }
 
-export function liveMonitorSeed(time) {
+export function liveMonitorSeed(time: number): EventLog['events'] {
   const log = makeEventLog()
   const turn = 1
   log.append('turn/start', time, { turn })
@@ -2036,7 +2145,7 @@ export function liveMonitorSeed(time) {
   return log.events
 }
 
-export async function apply(ctx, rawConfig) {
+export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<void> {
   const config = validateConfig(rawConfig)
   ctx.on('agent/pre-step', readonlyImportedSessionGuard)
 
@@ -2057,16 +2166,16 @@ export async function apply(ctx, rawConfig) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
-    async execute(args) {
+    async execute(args: MonitorStatsArgs) {
       return buildMonitorStats(await buildLiveMonitorTrace(liveManifest), args)
     },
   })
   const existing = new Set((await ctx.sessionPersistence.list()).map(header => header.id))
-  const traceBodies = new Map()
+  const traceBodies = new Map<string, string>()
   let liveCache = { expiresAt: 0, body: '' }
-  const report = {
+  const report: ImportReport = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     modelRunsStarted: 0,
@@ -2107,7 +2216,7 @@ export async function apply(ctx, rawConfig) {
     })
   }
 
-  const nativeStates = new Map()
+  const nativeStates = new Map<string, NativeLiveState>()
   let nativeTickRunning = false
   const nativeTick = async () => {
     if (nativeTickRunning) return

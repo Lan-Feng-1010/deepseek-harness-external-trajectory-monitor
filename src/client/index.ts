@@ -1,1 +1,1 @@
-export { apply, inject } from './index.tsx'
+export { apply, inject } from './observable-reasoning.tsx'

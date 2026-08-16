@@ -1,4 +1,3 @@
-import type { UserConfig } from 'tsdown'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -10,7 +9,4 @@ const { clientBundle } = await import(
   pathToFileURL(resolve(harnessRoot, 'packages/client/tsdown.client.ts')).href
 )
 
-const bundle = clientBundle('dsh-external-trajectory-importer', [])
-
-export default (inlineConfig: Pick<UserConfig, 'env'>): UserConfig[] =>
-  bundle(inlineConfig).filter(config => config.platform === 'browser')
+export default clientBundle('dsh-external-trajectory-importer', ['lib/types/index.js'])

@@ -4,7 +4,7 @@ DeepSeek Harness 的外部智能体实时轨迹监视插件。它只读观察 Co
 Claude CLI 和 ImplantAgent 持续追加的公开 JSONL 事件，并将其投影到 Harness
 原生 Trajectory UI，同时生成可比较的 append-only normalized ledger。
 
-当前插件版本：`0.3.2`<br>
+当前插件版本：`0.4.0`<br>
 原生实时投影版本：`3.2.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
@@ -65,14 +65,20 @@ matching assistant `tool-call` block.
 ## Repository layout
 
 ```text
-index.js                    Host plugin and trajectory adapters
-src/client/                 Harness Client UI source
-lib/client.js               Prebuilt Client bundle
+src/index.ts                Typed Host plugin and trajectory adapters
+src/types.ts                Manifest, event, ledger and adapter contracts
+src/client/                 Typed Harness Client UI source
+lib/index.js                Prebuilt Host runtime
+lib/client.js               Prebuilt Client runtime
+lib/types/                  Generated TypeScript declarations
+tsconfig*.json              Strict TypeScript source/build configuration
+tsdown.config.ts            Official Harness Host/Client bundle configuration
+scripts/sanitize-build.ts   Removes local absolute paths from compiled bundles
 cordis.patch.yml            Cordis bundle patch
 runtime-sources.json        Optional historical import manifest; empty by default
 live-sources.json           Active live manifest; empty by default
 live-sources.example.json   Three-agent configuration example
-scripts/validate.mjs        Synthetic, model-free regression test
+scripts/validate.ts         Synthetic, model-free regression test
 docs/                       Monitor-agent and comparison documentation
 ```
 
@@ -86,6 +92,11 @@ commit `47f943859bef60e4160492346772ded9b24f765a`. The integration uses Harness'
 Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
+
+Version `0.4.0` uses TypeScript authoring for both Host and Client. Harness still
+loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
+`trajectory_stats` schema, source manifests, normalized-ledger schema and
+SessionEvent projection contract are unchanged from `0.3.2`.
 
 Relevant upstream documents:
 
@@ -120,6 +131,23 @@ read-only historical imports, but historical replay is not required for live
 monitoring.
 
 ## Install in DeepSeek Harness
+
+The repository contains the required compiled runtime. To rebuild it from the
+typed source, use Node.js `^22.19.0 || >=24.0.0` and point `DSH_SOURCE_ROOT` to a
+DeepSeek Harness source checkout:
+
+```powershell
+pnpm install
+$env:DSH_SOURCE_ROOT = 'C:\path\to\deepseek-harness'
+pnpm run typecheck
+pnpm run lint
+pnpm run build
+pnpm run validate
+```
+
+The source uses the same strict TypeScript safety settings as the official
+Harness repository, including implicit-any, unchecked-index and exact-optional
+checks.
 
 From the DeepSeek Harness repository, use its CLI and replace the example paths:
 

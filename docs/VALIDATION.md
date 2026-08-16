@@ -2,7 +2,7 @@
 
 ## Current package
 
-- Plugin version: `0.3.2`
+- Plugin version: `0.4.0`
 - Native live projection: `3.2.0`
 - Normalized ledger schema: `external-trajectory-ledger-v2`
 - Initially accepted Harness revision: `0.1.0-rc.5`, commit
@@ -12,6 +12,10 @@
 
 The repository regression uses synthetic Codex, Claude and ImplantAgent public
 events. It verifies:
+
+- strict TypeScript source and declaration compilation for Host and Client;
+- official Harness `clientBundle` generation of `lib/index.js` and
+  `lib/client.js`;
 
 - monotonically increasing Request steps;
 - every Tool follows a linked assistant request in the same step;
@@ -24,6 +28,11 @@ events. It verifies:
 - contiguous append-only ledger sequence and tool transitions;
 - deterministic `trajectory_stats` filtering;
 - mirrored-session execution guard.
+
+The `0.4.0` migration intentionally keeps the `0.3.2` runtime interface
+identities and schemas unchanged. The synthetic regression is executed against
+the compiled JavaScript package export, rather than importing the TypeScript
+source directly.
 
 The original local UI acceptance also confirmed that Request rows and linked
 Tool drawers survived a full Harness page reload. That result is compatibility

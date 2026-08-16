@@ -2,6 +2,9 @@ node_modules/
 dist/
 build/
 coverage/
+*.tsbuildinfo
+lib/types/**/*.js
+lib/types/**/*.js.map
 generated-ledgers/
 generated-traces/
 *.jsonl

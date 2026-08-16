@@ -13,19 +13,24 @@ import {
   NORMALIZED_LEDGER_SCHEMA,
   readonlyImportedSessionGuard,
   unflushedNativeLedgerRecords,
-} from '../index.js'
+} from 'dsh-external-trajectory-importer'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = dirname(here)
+const packageMetadata = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as { version: string }
 
 class MockSession {
-  constructor(id) {
+  readonly id: string
+  readonly events: any[]
+  clock: number
+
+  constructor(id: string) {
     this.id = id
     this.events = []
     this.clock = 1_000
   }
 
-  append(type, data, envelope = {}) {
+  append(type: string, data: any, envelope: Record<string, unknown> = {}) {
     const event = {
       type,
       seq: this.events.length,
@@ -39,11 +44,11 @@ class MockSession {
   }
 }
 
-function jsonlRecords(values) {
-  return values.map((value, index) => ({ line: index + 1, value }))
+function jsonlRecords(values: any[]) {
+  return values.map((value: any, index: number) => ({ line: index + 1, value }))
 }
 
-function validateRelationalEvents(events) {
+function validateRelationalEvents(events: any[]): void {
   let openTurn = null
   let openStep = null
   const openCalls = new Set()
@@ -78,7 +83,7 @@ function validateRelationalEvents(events) {
     } else if (event.type === 'assistant/message') {
       assert.equal(openTurn, event.data.turn)
       assert.equal(openStep, event.data.step)
-      assert.ok(event.data.message.content.every(block => block.type !== 'reasoning'))
+      assert.ok(event.data.message.content.every((block: any) => block.type !== 'reasoning'))
     }
   }
   assert.equal(openTurn, null)
@@ -86,7 +91,7 @@ function validateRelationalEvents(events) {
   assert.equal(openCalls.size, 0)
 }
 
-function assertEveryToolFollowsLinkedAssistant(events) {
+function assertEveryToolFollowsLinkedAssistant(events: any[]): void {
   const linkedAt = new Map()
   for (const [index, event] of events.entries()) {
     if (event.type === 'assistant/message') {
@@ -123,14 +128,19 @@ assert.deepEqual(exampleManifest.sources.map(source => source.id), [
 ])
 assert.ok(exampleManifest.sources.every(source => source.cwd.startsWith('C:\\agent-workspaces\\')))
 const publishableText = await Promise.all([
-  'index.js',
+  'src/index.ts',
+  'lib/index.js',
   'lib/client.js',
   'tsdown.config.ts',
   'README.md',
 ].map(path => readFile(join(packageRoot, path), 'utf8')))
-assert.ok(publishableText.every(text => !text.includes('HUAWEI')))
-assert.ok(publishableText.every(text => !text.includes('C01_')))
-assert.ok(publishableText.every(text => !text.includes('F:\\')))
+const forbiddenLocalFragments = [
+  ['HUA', 'WEI'].join(''),
+  ['C01', '_'].join(''),
+  ['F:', '\\'].join(''),
+  packageRoot,
+]
+assert.ok(publishableText.every(text => forbiddenLocalFragments.every(fragment => !text.includes(fragment))))
 
 const codexSession = new MockSession('session-external-trajectory-native-validation-codex')
 const codexState = initializeNativeLiveSession(codexSession, {
@@ -139,6 +149,11 @@ const codexState = initializeNativeLiveSession(codexSession, {
   kind: 'codex',
   provider: 'codex-cli',
   model: 'fixture-no-model',
+  root: 'C:\\fixture-logs\\codex',
+  cwd: 'C:\\fixture-workspaces\\codex',
+  suffix: '_events.jsonl',
+  nativeSession: true,
+  projectionMode: 'default',
   ledgerRoot: 'C:\\fixture-ledgers\\codex',
 }, 'C:\\fixture-logs\\codex\\CASE_001_events.jsonl', 'CASE_001')
 appendNativeLiveRecords(codexState, jsonlRecords([
@@ -170,6 +185,11 @@ const claudeState = initializeNativeLiveSession(claudeSession, {
   kind: 'claude',
   provider: 'claude-cli',
   model: 'fixture-no-model',
+  root: 'C:\\fixture-logs\\claude',
+  cwd: 'C:\\fixture-workspaces\\claude',
+  suffix: '_events.jsonl',
+  nativeSession: true,
+  projectionMode: 'default',
   ledgerRoot: 'C:\\fixture-ledgers\\claude',
 }, 'C:\\fixture-logs\\claude\\CASE_001_events.jsonl', 'CASE_001')
 const duplicatedClaudeMessage = {
@@ -227,9 +247,9 @@ const implantPlan = [
   ['t11_refinement', 'M4', 'T11'],
   ['t12_multisite_coordination', 'M5', 'T12'],
   ['t13_output_package', 'M6', 'T13'],
-]
-const implantEvents = []
-const addMcpPair = (id, tool, args) => {
+] as const
+const implantEvents: any[] = []
+const addMcpPair = (id: string, tool: string, args: any): void => {
   implantEvents.push({ type: 'item.started', item: {
     id,
     type: 'mcp_tool_call',
@@ -266,6 +286,10 @@ const implantState = initializeNativeLiveSession(implantSession, {
   kind: 'codex',
   provider: 'codex-cli',
   model: 'fixture-no-model',
+  root: 'C:\\fixture-logs\\implantagent',
+  cwd: 'C:\\fixture-workspaces\\implantagent',
+  suffix: '_events.jsonl',
+  nativeSession: true,
   projectionMode: 'implantagent-modules',
   ledgerRoot: 'C:\\fixture-ledgers\\implantagent',
 }, 'C:\\fixture-logs\\implantagent\\CASE_FIXED_events.jsonl', 'CASE_FIXED')
@@ -292,7 +316,7 @@ assert.equal(implantLedger.filter(row => row.event_type === 'tool_result').lengt
 assert.ok(implantLedger.filter(row => row.event_type === 'tool_result').every(row => row.duration_ms === 12.5))
 assert.ok(implantLedger.some(row => row.raw_tool_name === 'mcp__implantagent__t10_anatomic_safety' && row.module_id === 'M4' && row.node_id === 'T10'))
 
-const statsTrace = {
+const statsTrace: any = {
   errorComparison: [
     { id: 'implantagent-external', label: 'ImplantAgent', kind: 'codex', workflowMode: 'fixed-modules' },
     { id: 'codex-only', label: 'Codex', kind: 'codex', workflowMode: 'free-form' },
@@ -331,7 +355,7 @@ assert.equal(nextCalls, 1)
 const report = {
   schemaVersion: 1,
   validatedAt: new Date().toISOString(),
-  pluginVersion: '0.3.2',
+  pluginVersion: packageMetadata.version,
   nativeLiveProjectionVersion: NATIVE_LIVE_PROJECTION_VERSION,
   normalizedLedgerSchema: NORMALIZED_LEDGER_SCHEMA,
   modelRunsStarted: 0,

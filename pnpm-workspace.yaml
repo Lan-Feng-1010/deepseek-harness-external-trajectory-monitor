@@ -1,0 +1,7 @@
+packages:
+  - .
+
+# pnpm 11 blocks lifecycle scripts by default. esbuild's reviewed native-binary
+# installer is required by tsx/tsdown; no other dependency build is approved.
+allowBuilds:
+  esbuild: true
