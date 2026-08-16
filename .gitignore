@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+coverage/
+generated-ledgers/
+generated-traces/
+*.jsonl
+*.log
+validation-report.json
+live-validation-report.json
+external-trajectory-import-report.json
+live-sources.local.json
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

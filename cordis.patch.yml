@@ -1,0 +1,6 @@
+# Read-only projection of external-agent JSONL. Configuration defaults to the
+# manifests beside this package and never replaces a model/provider preset.
+- insert:
+    - id: external-trajectory-importer
+      name: 'dsh-external-trajectory-importer'
+      config: {}

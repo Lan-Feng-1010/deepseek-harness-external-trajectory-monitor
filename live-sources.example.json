@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "implantagent-external",
+      "label": "ImplantAgent",
+      "kind": "codex",
+      "root": "C:\\trajectory-logs\\implantagent",
+      "cwd": "C:\\agent-workspaces\\implantagent",
+      "suffix": "_events.jsonl",
+      "nativeSession": true,
+      "provider": "codex-cli",
+      "model": "external-model",
+      "projectionMode": "implantagent-modules",
+      "ledgerRoot": "C:\\trajectory-ledgers\\implantagent"
+    },
+    {
+      "id": "codex-only",
+      "label": "Codex",
+      "kind": "codex",
+      "root": "C:\\trajectory-logs\\codex",
+      "cwd": "C:\\agent-workspaces\\codex",
+      "suffix": "_events.jsonl",
+      "nativeSession": true,
+      "provider": "codex-cli",
+      "model": "external-model",
+      "ledgerRoot": "C:\\trajectory-ledgers\\codex"
+    },
+    {
+      "id": "claude-only",
+      "label": "Claude",
+      "kind": "claude",
+      "root": "C:\\trajectory-logs\\claude",
+      "cwd": "C:\\agent-workspaces\\claude",
+      "suffix": "_events.jsonl",
+      "nativeSession": true,
+      "provider": "claude-cli",
+      "model": "external-model",
+      "ledgerRoot": "C:\\trajectory-ledgers\\claude"
+    }
+  ]
+}
