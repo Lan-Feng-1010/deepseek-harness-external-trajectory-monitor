@@ -2,8 +2,8 @@
 
 DeepSeek Harness's universal external agent real-time trajectory monitoring plugin. It passively observes publicly exposed JSONL events continuously appended by any external agent process, projects them into Harness's native Trajectory UI, and simultaneously generates a comparable append-only normalized ledger. Codex and Claude use built-in adapters; other agents use the unified `external-agent-event-v1` protocol.
 
-Current plugin version：`0.5.0`<br>
-Native real-time projection version：`4.0.0`
+Current plugin version: `0.5.1`<br>
+Native real-time projection version: `4.1.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
 > DeepSeek Harness is still pre-release, so compatibility must be revalidated
@@ -94,10 +94,11 @@ Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
 
-Version `0.5.0` uses TypeScript authoring for both Host and Client. Harness still
+Version `0.5.1` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
 `trajectory_stats` tool and SessionEvent projection remain compatible. Version
-`0.5.0` adds the generic source adapter, projection `4.0.0` and ledger schema v3.
+`0.5.1` adds native v0.8 ImplantAgent trace projection and hot-reloads the live
+source manifest, while retaining the generic adapter and ledger schema v3.
 
 Relevant upstream documents:
 
@@ -115,7 +116,7 @@ Important fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | Stable source identity. The example IDs work with monitor-agent aliases. |
-| `kind` | `generic`, `codex`, `claude`, or non-native `implantagent-trace`. |
+| `kind` | `generic`, `codex`, `claude`, or native `implantagent-trace`. |
 | `root` | Directory receiving append-only JSONL files. |
 | `cwd` | External agent workspace shown in the mirrored session metadata. |
 | `nativeSession` | Create a native Harness Trajectory session when true. |
@@ -131,6 +132,11 @@ The cloud supervisor must continuously synchronize complete JSONL lines into
 `root`. If it uploads only after completion, the final trajectory remains
 viewable but was not observed in real time. Rewriting or deleting earlier lines
 during a run violates the append-only contract.
+
+The plugin re-reads `live-sources.json` during monitoring, so a new external
+process can be registered without restarting Harness or disturbing an existing
+Harness-native run. Existing mirrored sessions are append-only and are not
+deleted when a source is removed from the manifest.
 
 `runtime-sources.json` is intentionally empty. It can be used for hash-locked,
 read-only historical imports, but historical replay is not required for live

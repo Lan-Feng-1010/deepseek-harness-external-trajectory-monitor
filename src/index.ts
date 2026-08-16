@@ -51,7 +51,7 @@ const DEFAULT_LIVE_MANIFEST_PATH = fileURLToPath(new URL('./live-sources.json', 
 const DEFAULT_LEDGER_ROOT = fileURLToPath(new URL('./generated-ledgers', import.meta.url))
 const SESSION_PREFIX = 'session-external-trajectory-'
 export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v3-2`
-export const NATIVE_LIVE_PROJECTION_VERSION = '4.0.0'
+export const NATIVE_LIVE_PROJECTION_VERSION = '4.1.0'
 export const NORMALIZED_LEDGER_SCHEMA = 'external-trajectory-ledger-v3'
 const TRACE_ROUTE = '/api/external-reasoning-trace'
 const TOOL_ITEM_TYPES = new Set(['command_execution', 'file_change', 'web_search', 'mcp_tool_call'])
@@ -79,6 +79,22 @@ const IMPLANTAGENT_TOOLS = Object.freeze({
   t11_refinement: { nodeId: 'T11', moduleId: 'M4', title: '有界修正 / Bounded refinement' },
   t12_multisite_coordination: { nodeId: 'T12', moduleId: 'M5', title: '多位点协调 / Multi-site coordination' },
   t13_output_package: { nodeId: 'T13', moduleId: 'M6', title: '输出封装 / Output package' },
+})
+
+const IMPLANTAGENT_NODE_TITLES = Object.freeze({
+  T01: '分割选择 / Segmentation selection',
+  T02: '候选位点生成 / Candidate generation',
+  T03: '位点准入 / Site admission',
+  T04: '路径证据 / Routing evidence',
+  T05: '初始入口 / Initial entry',
+  T06: '初始轴向 / Initial axis',
+  T07: '初始尺寸 / Initial size',
+  T08: '初始深度 / Initial depth',
+  T09: '上颌窦路径 / Sinus path',
+  T10: '解剖安全 / Anatomic safety',
+  T11: '有界修正 / Bounded refinement',
+  T12: '多位点协调 / Multi-site coordination',
+  T13: '输出封装 / Output package',
 })
 
 function requireNonEmptyString(value: unknown, label: string): string {
@@ -1073,12 +1089,12 @@ async function latestLiveFile(source: LiveSource): Promise<LatestLiveFile | null
 
 function liveRunRecord(records: readonly JsonlRecord[], details: LatestLiveFile['details']): RunRecord {
   const exact = records.flatMap(record => {
-    const value = exactEventTime(record.value?.timestamp ?? record.value?.started_at_utc)
+    const value = exactEventTime(record.value?.timestamp ?? record.value?.observed_at ?? record.value?.started_at_utc)
     return value === null ? [] : [value]
   })
   const started = exact.length > 0 ? Math.min(...exact) : Math.max(0, details.birthtimeMs || details.ctimeMs || details.mtimeMs)
   const finishedExact = records.flatMap(record => {
-    const value = exactEventTime(record.value?.finished_at_utc ?? record.value?.timestamp)
+    const value = exactEventTime(record.value?.finished_at_utc ?? record.value?.timestamp ?? record.value?.observed_at)
     return value === null ? [] : [value]
   })
   const finished = finishedExact.length > 0 ? Math.max(...finishedExact) : details.mtimeMs
@@ -1089,7 +1105,9 @@ function liveRunRecord(records: readonly JsonlRecord[], details: LatestLiveFile[
 }
 
 export function nativeLiveSessionId(source: LiveSource, path: string, caseId: string): string {
-  const sessionProjection = source.kind === 'generic' ? 'v4' : 'v3-2'
+  const sessionProjection = source.kind === 'generic'
+    ? 'v4'
+    : source.kind === 'implantagent-trace' ? 'v4-1' : 'v3-2'
   return `${SESSION_PREFIX}native-${sessionProjection}-${sanitizeId(source.id)}-${sanitizeId(caseId)}-${sha256Text(path).slice(0, 12)}`
 }
 
@@ -1158,7 +1176,7 @@ export function initializeNativeLiveSession(session: HarnessSession, source: Liv
 }
 
 function sourceTimestamp(event: JsonObject) {
-  const value = event?.timestamp ?? event?.started_at_utc ?? null
+  const value = event?.timestamp ?? event?.observed_at ?? event?.started_at_utc ?? null
   const milliseconds = exactEventTime(value)
   return {
     milliseconds,
@@ -1689,6 +1707,151 @@ function appendGenericRequestCompleted(state: NativeLiveState, record: JsonlReco
   })
 }
 
+function implantAgentRequestId(event: JsonObject, record: JsonlRecord): string {
+  return requireNonEmptyString(event.request_id, `ImplantAgent event at line ${record.line} request_id`)
+}
+
+function assertImplantAgentRequest(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
+  const requestId = implantAgentRequestId(event, record)
+  if (state.currentGenericRequestId !== requestId) {
+    throw new Error(`ImplantAgent event at line ${record.line} references request ${requestId}; active request is ${String(state.currentGenericRequestId)}`)
+  }
+}
+
+function implantAgentModuleText(event: JsonObject): string {
+  const moduleId = typeof event.module_id === 'string' ? event.module_id.toUpperCase() : 'UNKNOWN'
+  const title = IMPLANTAGENT_MODULES[moduleId as keyof typeof IMPLANTAGENT_MODULES] ?? `${moduleId} · External module`
+  const allowed = Array.isArray(event.allowed_tool_ids) ? event.allowed_tool_ids.map(String).join(', ') : ''
+  return allowed === '' ? title : `${title}\n当前允许节点：${allowed}`
+}
+
+function beginImplantAgentRequest(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
+  const requestId = implantAgentRequestId(event, record)
+  if (state.currentGenericRequestId === requestId) {
+    throw new Error(`ImplantAgent request_started repeated request_id ${requestId}`)
+  }
+  if (state.openCalls.size > 0) throw new Error(`ImplantAgent request ${requestId} started with open tool calls`)
+  if (state.currentGenericRequestId !== null) {
+    flushGenericRequestWithoutTool(state, record, event)
+    rotateNativeLiveStep(state)
+  }
+  state.currentGenericRequestId = requestId
+  state.codexRequestTextBlocks = [{ type: 'text', text: implantAgentModuleText(event) }]
+  state.codexRequestToolBlocks = []
+  appendLedgerRecord(state, record, event, {
+    event_type: 'request_started',
+    public_assistant_message: implantAgentModuleText(event),
+    status: 'in_progress',
+    tool_call_id: requestId,
+    module_id: typeof event.module_id === 'string' ? event.module_id : null,
+  })
+}
+
+function appendImplantAgentAction(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
+  assertImplantAgentRequest(state, record, event)
+  const action = typeof event.action === 'string' ? event.action : 'observable_action'
+  const toolId = typeof event.tool_id === 'string' ? event.tool_id.toUpperCase() : null
+  const siteId = typeof event.site_id === 'string' ? event.site_id : null
+  const publicReason = typeof event.public_reason === 'string' && event.public_reason.trim() !== ''
+    ? redactObservableText(event.public_reason)
+    : 'No public reason was emitted by the external supervisor.'
+  const actionText = [
+    `公开动作：${action}${toolId === null ? '' : ` · ${toolId}`}${siteId === null ? '' : ` · site ${siteId}`}`,
+    `公开理由：${publicReason}`,
+  ].join('\n')
+  state.codexRequestTextBlocks.push({ type: 'text', text: actionText })
+  appendLedgerRecord(state, record, event, {
+    event_type: 'assistant_message',
+    public_assistant_message: actionText,
+    status: 'completed',
+    tool_call_id: state.currentGenericRequestId,
+    module_id: typeof event.module_id === 'string' ? event.module_id : null,
+    node_id: toolId,
+  })
+}
+
+function implantAgentVisibleToolName(toolId: string): string {
+  const title = IMPLANTAGENT_NODE_TITLES[toolId as keyof typeof IMPLANTAGENT_NODE_TITLES]
+  return title === undefined ? toolId : `${toolId} · ${title}`
+}
+
+function implantAgentCallId(state: NativeLiveState, event: JsonObject, record: JsonlRecord): string {
+  const raw = requireNonEmptyString(event.call_id, `ImplantAgent tool event at line ${record.line} call_id`)
+  const normalized = sanitizeId(raw) || sha256Text(raw).slice(0, 12)
+  return `external-live-implantagent-${sanitizeId(state.source.id)}-${normalized}`
+}
+
+function implantAgentAuditMetadata(event: JsonObject): ToolAuditMetadata {
+  const toolId = typeof event.tool_id === 'string' ? event.tool_id.toUpperCase() : null
+  const rawToolName = typeof event.raw_tool_name === 'string' && event.raw_tool_name.trim() !== ''
+    ? event.raw_tool_name
+    : toolId
+  return {
+    module_id: typeof event.module_id === 'string' ? event.module_id : null,
+    node_id: toolId,
+    raw_tool_name: rawToolName,
+    invocation_index: Number.isSafeInteger(event.invocation_count) ? event.invocation_count : null,
+    retry_index: Number.isSafeInteger(event.retry_index) ? event.retry_index : null,
+  }
+}
+
+function appendImplantAgentToolCall(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
+  assertImplantAgentRequest(state, record, event)
+  const callId = implantAgentCallId(state, event, record)
+  if (state.callSeqs.has(callId)) return
+  const toolId = requireNonEmptyString(event.tool_id, `ImplantAgent tool_call at line ${record.line} tool_id`).toUpperCase()
+  const toolName = implantAgentVisibleToolName(toolId)
+  const argumentsText = redactObservableText(event.arguments_summary ?? {})
+  const audit = implantAgentAuditMetadata(event)
+  state.codexRequestToolBlocks = [{ type: 'tool-call', id: callId, name: toolName, arguments: argumentsText }]
+  appendNativeLiveAssistantContent(
+    state,
+    [...state.codexRequestTextBlocks, ...state.codexRequestToolBlocks],
+    record,
+    event,
+    {
+      event_type: 'request_anchor',
+      tool_call_id: callId,
+      tool_name: toolName,
+      tool_arguments: argumentsText,
+      status: 'observed',
+      ...audit,
+    },
+  )
+  state.assistantLinkedCalls.add(callId)
+  ensureNativeLiveToolCall(state, callId, toolName, argumentsText, record, event, audit)
+}
+
+function appendImplantAgentToolResult(state: NativeLiveState, record: JsonlRecord, event: JsonObject): void {
+  assertImplantAgentRequest(state, record, event)
+  const callId = implantAgentCallId(state, event, record)
+  const status = String(event.status ?? '').trim().toLowerCase()
+  const isError = !['completed', 'success', 'succeeded'].includes(status)
+  const result = isError
+    ? {
+        status: event.status ?? null,
+        error_type: event.error_type ?? null,
+        error_message: event.error_message ?? null,
+        node_revision: event.node_revision ?? null,
+      }
+    : {
+        status: event.status ?? null,
+        result_summary: event.result_summary ?? null,
+        result_sha256: event.result_sha256 ?? null,
+        output_artifact_handles: event.output_artifact_handles ?? [],
+        node_revision: event.node_revision ?? null,
+      }
+  appendNativeLiveToolResult(
+    state,
+    callId,
+    redactObservableText(result),
+    isError,
+    record,
+    event,
+    typeof event.duration_ms === 'number' ? event.duration_ms : null,
+  )
+}
+
 function finalizeNativeLiveSession(state: NativeLiveState, succeeded: boolean, message: string, record: JsonlRecord, event: JsonObject): void {
   if (state.finalized) return
   for (const callId of state.openCalls) {
@@ -1703,7 +1866,9 @@ function finalizeNativeLiveSession(state: NativeLiveState, succeeded: boolean, m
   }
   flushDeferredNativeRequests(state)
   if (state.source.kind === 'codex' && state.source.projectionMode !== 'implantagent-modules') flushCodexFinalPublicRequest(state)
-  if (state.source.kind === 'generic') flushGenericRequestWithoutTool(state, record, event)
+  if (state.source.kind === 'generic' || state.source.kind === 'implantagent-trace') {
+    flushGenericRequestWithoutTool(state, record, event)
+  }
   if (state.lastToolName !== null) {
     appendLedgerRecord(state, record, event, {
       event_type: 'tool_transition',
@@ -1828,6 +1993,67 @@ export function appendNativeLiveRecords(state: NativeLiveState, records: readonl
         finalizeNativeLiveSession(state, succeeded, `External Claude terminal subtype: ${String(event.subtype ?? 'unknown')}`, record, event)
         appended += 3
       }
+      continue
+    }
+
+    if (state.source.kind === 'implantagent-trace') {
+      const type = String(event?.event_type ?? '').trim().toLowerCase()
+      if (type === 'run_started') {
+        appendLedgerRecord(state, record, event, { event_type: 'run_started', status: 'in_progress' })
+        appended += 1
+        continue
+      }
+      if (type === 'request_started') {
+        beginImplantAgentRequest(state, record, event)
+        appended += 1
+        continue
+      }
+      if (type === 'action_selected') {
+        appendImplantAgentAction(state, record, event)
+        appended += 1
+        continue
+      }
+      if (type === 'tool_call') {
+        appendImplantAgentToolCall(state, record, event)
+        appended += 2
+        continue
+      }
+      if (type === 'tool_result') {
+        appendImplantAgentToolResult(state, record, event)
+        appended += 1
+        continue
+      }
+      if (type === 'supervisor_failure') {
+        assertImplantAgentRequest(state, record, event)
+        const message = `公开故障：${String(event.error_type ?? 'SupervisorFailure')} · ${String(event.error_message ?? 'No public error message')}`
+        state.codexRequestTextBlocks.push({ type: 'text', text: redactObservableText(message) })
+        appendLedgerRecord(state, record, event, {
+          event_type: 'supervisor_failure',
+          public_assistant_message: redactObservableText(message),
+          status: 'failed',
+          tool_call_id: state.currentGenericRequestId,
+          module_id: typeof event.module_id === 'string' ? event.module_id : null,
+        })
+        appended += 1
+        continue
+      }
+      if (type === 'run_finished') {
+        const succeeded = String(event.status ?? '').trim().toLowerCase() === 'completed'
+        const reason = typeof event.finish_reason === 'string' && event.finish_reason !== ''
+          ? event.finish_reason
+          : `ImplantAgent run ${succeeded ? 'completed' : 'failed'}`
+        finalizeNativeLiveSession(state, succeeded, reason, record, event)
+        appended += 3
+        continue
+      }
+      appendLedgerRecord(state, record, event, {
+        event_type: type === '' ? 'implantagent_event' : type,
+        status: typeof event.status === 'string' ? event.status : 'observed',
+        tool_call_id: typeof event.call_id === 'string' ? event.call_id : null,
+        module_id: typeof event.module_id === 'string' ? event.module_id : null,
+        node_id: typeof event.tool_id === 'string' ? event.tool_id : null,
+      })
+      appended += 1
       continue
     }
 
@@ -1977,6 +2203,113 @@ function buildGenericObservableTrace(context: JsonObject, records: readonly Json
 }
 
 function buildImplantAgentToolTrace(context: JsonObject, records: readonly JsonlRecord[], malformedLines: readonly number[], runRecord: RunRecord): ObservableTrace {
+  if (records.some(record => typeof record.value?.event_type === 'string')) {
+    const events: ObservableTraceEvent[] = []
+    const toolsById = new Map<string, ObservableTraceEvent>()
+    let phase = 0
+    let publicContext = ''
+    let missingPerEventTimestamps = 0
+    for (const record of records) {
+      const row = record.value
+      const type = String(row?.event_type ?? '').trim().toLowerCase()
+      const timestampMs = exactEventTime(row?.observed_at)
+      if (timestampMs === null) missingPerEventTimestamps += 1
+      if (type === 'request_started') {
+        phase += 1
+        publicContext = implantAgentModuleText(row)
+        events.push({
+          seq: 0,
+          kind: 'public_plan',
+          phase,
+          timestampMs,
+          timeEvidence: timestampMs === null ? 'not-recorded' : 'source-event',
+          sourceLine: record.line,
+          requestId: row.request_id ?? `line-${record.line}`,
+          text: publicContext,
+          preview: previewText(publicContext),
+        })
+        continue
+      }
+      if (type === 'action_selected' || type === 'supervisor_failure') {
+        const action = type === 'action_selected'
+          ? `Action ${String(row.action ?? 'unknown')} ${String(row.tool_id ?? '')}`.trim()
+          : `Supervisor failure ${String(row.error_type ?? '')}`.trim()
+        const reason = type === 'action_selected' ? row.public_reason : row.error_message
+        publicContext = `${action}\n${String(reason ?? '')}`.trim()
+        events.push({
+          seq: 0,
+          kind: 'public_reasoning',
+          phase,
+          timestampMs,
+          timeEvidence: timestampMs === null ? 'not-recorded' : 'source-event',
+          sourceLine: record.line,
+          requestId: row.request_id ?? `line-${record.line}`,
+          text: publicContext,
+          preview: previewText(publicContext),
+        })
+        continue
+      }
+      if (type === 'tool_call') {
+        const rawCallId = typeof row.call_id === 'string' ? row.call_id : `line-${record.line}`
+        const toolId = typeof row.tool_id === 'string' ? row.tool_id.toUpperCase() : 'UNKNOWN'
+        const argumentsText = redactObservableText(row.arguments_summary ?? {})
+        const audit = implantAgentAuditMetadata(row)
+        const tool: ObservableTraceEvent = {
+          seq: 0,
+          kind: 'tool',
+          phase,
+          timestampMs,
+          resultTimestampMs: null,
+          timeEvidence: timestampMs === null ? 'not-recorded' : 'source-event',
+          durationMs: null,
+          gapFromPreviousToolMs: null,
+          callId: rawCallId,
+          toolName: implantAgentVisibleToolName(toolId),
+          rawToolName: audit.raw_tool_name ?? toolId,
+          workflowNodeId: toolId,
+          workflowModuleId: audit.module_id ?? null,
+          invocationIndex: audit.invocation_index ?? null,
+          retryIndex: audit.retry_index ?? null,
+          status: 'pending',
+          exitCode: null,
+          callSourceLine: record.line,
+          resultSourceLine: null,
+          arguments: argumentsText,
+          argumentsPreview: previewText(argumentsText),
+          result: '',
+          resultPreview: '',
+          publicContextBefore: publicContext,
+          publicContextPreview: publicContext === '' ? '' : previewText(publicContext),
+        }
+        events.push(tool)
+        toolsById.set(rawCallId, tool)
+        continue
+      }
+      if (type === 'tool_result') {
+        const rawCallId = typeof row.call_id === 'string' ? row.call_id : `line-${record.line}`
+        const tool = toolsById.get(rawCallId)
+        if (tool === undefined) continue
+        const status = String(row.status ?? '').trim().toLowerCase()
+        const failed = !['completed', 'success', 'succeeded'].includes(status)
+        const resultText = redactObservableText(failed
+          ? { status: row.status ?? null, error_type: row.error_type ?? null, error_message: row.error_message ?? null }
+          : { status: row.status ?? null, result_summary: row.result_summary ?? null, result_sha256: row.result_sha256 ?? null })
+        tool.resultTimestampMs = timestampMs
+        tool.resultSourceLine = record.line
+        tool.status = failed ? 'error' : 'success'
+        tool.result = resultText
+        tool.resultPreview = previewText(resultText)
+        tool.durationMs = typeof row.duration_ms === 'number' && Number.isFinite(row.duration_ms)
+          ? Math.max(0, row.duration_ms)
+          : tool.timestampMs !== null && timestampMs !== null ? Math.max(0, timestampMs - tool.timestampMs) : null
+        if (failed) Object.assign(tool, classifyToolError(tool))
+      }
+    }
+    return makeObservableTrace(context, runRecord, malformedLines, 'source-event-timestamps', events, {
+      missingPerEventTimestamps,
+      hiddenReasoningContentIncluded: 0,
+    })
+  }
   const events: ObservableTraceEvent[] = []
   for (const record of records) {
     const row = record.value
@@ -2438,7 +2771,7 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
   ctx.on('agent/pre-step', readonlyImportedSessionGuard)
 
   const manifest = await loadManifest(config.manifestPath)
-  const liveManifest = await loadLiveManifest(config.liveManifestPath)
+  let liveManifest = await loadLiveManifest(config.liveManifestPath)
   ctx.tools.register({
     name: 'trajectory_stats',
     description: 'Read-only deterministic statistics for all configured external-agent trajectories. Use this tool to count calls, compare failures and recovery, or filter by source/case/tool. It never runs or changes an evaluated agent and never exposes hidden chain-of-thought.',
@@ -2457,6 +2790,7 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
       render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args: MonitorStatsArgs) {
+      liveManifest = await loadLiveManifest(config.liveManifestPath)
       return buildMonitorStats(await buildLiveMonitorTrace(liveManifest), args)
     },
   })
@@ -2510,7 +2844,8 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
     if (nativeTickRunning) return
     nativeTickRunning = true
     try {
-      for (const source of liveManifest.sources.filter(item => item.nativeSession && ['codex', 'claude', 'generic'].includes(item.kind))) {
+      liveManifest = await loadLiveManifest(config.liveManifestPath)
+      for (const source of liveManifest.sources.filter(item => item.nativeSession)) {
         const latest = await latestLiveFile(source)
         if (latest === null) continue
         const caseId = caseIdFromFilename(latest.name)
@@ -2551,7 +2886,9 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
           ? buildCodexObservableTrace(context, jsonl.records, jsonl.malformedLines, runRecord)
           : source.kind === 'claude'
             ? buildClaudeObservableTrace(context, jsonl.records, jsonl.malformedLines, runRecord)
-            : buildGenericObservableTrace(context, jsonl.records, jsonl.malformedLines, runRecord)
+            : source.kind === 'generic'
+              ? buildGenericObservableTrace(context, jsonl.records, jsonl.malformedLines, runRecord)
+              : buildImplantAgentToolTrace(context, jsonl.records, jsonl.malformedLines, runRecord)
         traceBodies.set(sessionId, JSON.stringify(trace))
         const ledgerBatch = unflushedNativeLedgerRecords(state)
         if (ledgerBatch.length > 0) {
@@ -2611,6 +2948,7 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
       if (sessionId === LIVE_MONITOR_SESSION_ID) {
         const now = Date.now()
         if (liveCache.expiresAt <= now) {
+          liveManifest = await loadLiveManifest(config.liveManifestPath)
           liveCache = {
             expiresAt: now + 1500,
             body: JSON.stringify(await buildLiveMonitorTrace(liveManifest)),

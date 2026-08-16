@@ -1,6 +1,6 @@
 # Generic external-agent JSONL protocol
 
-Plugin `0.5.0` accepts any external agent process through `kind: "generic"`.
+Plugin `0.5.1` accepts any external agent process through `kind: "generic"`.
 Codex and Claude may continue using their native adapters. ImplantAgent's
 M1-M6/T01-T13 display is an optional projection overlay and is not the core
 protocol.

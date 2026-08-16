@@ -27,6 +27,18 @@
       "ledgerRoot": "C:\\trajectory-ledgers\\implantagent"
     },
     {
+      "id": "implantagent-v08-trace",
+      "label": "ImplantAgent v0.8",
+      "kind": "implantagent-trace",
+      "root": "C:\\trajectory-logs\\implantagent-v08",
+      "cwd": "C:\\agent-workspaces\\implantagent-v08",
+      "suffix": ".events.jsonl",
+      "nativeSession": true,
+      "provider": "external-supervisor",
+      "model": "caller-owned-model",
+      "ledgerRoot": "C:\\trajectory-ledgers\\implantagent-v08"
+    },
+    {
       "id": "codex-only",
       "label": "Codex",
       "kind": "codex",
