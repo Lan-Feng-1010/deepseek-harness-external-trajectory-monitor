@@ -2,6 +2,18 @@
   "schemaVersion": 1,
   "sources": [
     {
+      "id": "my-external-agent",
+      "label": "My external agent",
+      "kind": "generic",
+      "root": "C:\\trajectory-logs\\my-agent",
+      "cwd": "C:\\agent-workspaces\\my-agent",
+      "suffix": ".jsonl",
+      "nativeSession": true,
+      "provider": "external-process",
+      "model": "caller-owned-model",
+      "ledgerRoot": "C:\\trajectory-ledgers\\my-agent"
+    },
+    {
       "id": "implantagent-external",
       "label": "ImplantAgent",
       "kind": "codex",

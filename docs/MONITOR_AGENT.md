@@ -6,18 +6,19 @@ DeepSeek 的角色不是第四个被评价的执行 Agent，而是轨迹分析�
 
 1. 你用自然语言提出统计或诊断问题。
 2. DeepSeek 调用 `trajectory_stats`。
-3. 插件从三个 live source 重新生成只读快照并确定性计算答案。
+3. 插件从所有配置的 live source 重新生成只读快照并确定性计算答案。
 4. DeepSeek把结构化结果解释成易读结论。
 
-精确数字由插件计算，DeepSeek 不从长日志中自行估算。工具不会运行外部模型、执行 Implant 工具、修改日志或向三个被评价 Agent 回传信息。
+精确数字由插件计算，DeepSeek 不从长日志中自行估算。工具不会运行外部模型、执行外部工具、修改日志或向任何被评价 Agent 回传信息。
 
 ## 使用方式
 
-`[Live Monitor] Codex · Claude · ImplantAgent` 是纯展示 session，guard 会拒绝任何模型 step。若要问问题，请新建一个普通 DeepSeek Harness 会话，然后提问；该会话可以看到全局只读工具 `trajectory_stats`。
+`[Live Monitor] External agents` 是纯展示 session，guard 会拒绝任何模型 step。若要问问题，请新建一个普通 DeepSeek Harness 会话，然后提问；该会话可以看到全局只读工具 `trajectory_stats`。
 
 示例问题：
 
-- “比较三个 arm 当前各调用了多少次工具，失败率是多少？”
+- “比较当前所有 arm 各调用了多少次工具，失败率是多少？”
+- “只看 source ID `my-external-agent`，列出它的工具切换和错误。”
 - “ImplantAgent 调用了多少次 jq，其中失败多少次？”
 - “ImplantAgent 有哪些未观察恢复的错误？按错误类别排序。”
 - “Codex 和 Claude 的唯一工具数、pending 调用和恢复步数有什么差异？”
@@ -27,7 +28,7 @@ DeepSeek 的角色不是第四个被评价的执行 Agent，而是轨迹分析�
 
 | 参数 | 可选值/含义 |
 | --- | --- |
-| `agent` | `all`, `implantagent`, `codex`, `claude` |
+| `agent` | `all`，或任意配置的 source ID、kind、label |
 | `case_id` | 当前 live stream 的精确病例 ID |
 | `tool_name` | 不区分大小写的工具名子串，例如 `jq` |
 | `include_errors` | 是否返回最多 10 个有界错误例子 |

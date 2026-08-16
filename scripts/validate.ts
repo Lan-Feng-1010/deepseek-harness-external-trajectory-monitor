@@ -120,8 +120,9 @@ const liveManifest = await loadLiveManifest(join(packageRoot, 'live-sources.json
 const exampleManifest = await loadLiveManifest(join(packageRoot, 'live-sources.example.json'))
 assert.deepEqual(historicalManifest.sessions, [])
 assert.deepEqual(liveManifest.sources, [])
-assert.equal(exampleManifest.sources.length, 3)
+assert.equal(exampleManifest.sources.length, 4)
 assert.deepEqual(exampleManifest.sources.map(source => source.id), [
+  'my-external-agent',
   'implantagent-external',
   'codex-only',
   'claude-only',
@@ -133,6 +134,7 @@ const publishableText = await Promise.all([
   'lib/client.js',
   'tsdown.config.ts',
   'README.md',
+  'docs/GENERIC_AGENT_PROTOCOL.md',
 ].map(path => readFile(join(packageRoot, path), 'utf8')))
 const forbiddenLocalFragments = [
   ['HUA', 'WEI'].join(''),
@@ -233,6 +235,58 @@ assert.deepEqual(
   [1500, 1250],
 )
 
+const genericSession = new MockSession('session-external-trajectory-native-validation-generic')
+const genericState = initializeNativeLiveSession(genericSession, {
+  id: 'my-external-agent',
+  label: 'My external agent',
+  kind: 'generic',
+  provider: 'external-process',
+  model: 'fixture-no-model',
+  root: 'C:\\fixture-logs\\generic',
+  cwd: 'C:\\fixture-workspaces\\generic',
+  suffix: '.jsonl',
+  nativeSession: true,
+  projectionMode: 'default',
+  ledgerRoot: 'C:\\fixture-ledgers\\generic',
+}, 'C:\\fixture-logs\\generic\\CASE_GENERIC.jsonl', 'CASE_GENERIC')
+appendNativeLiveRecords(genericState, jsonlRecords([
+  { schema_version: 'external-agent-event-v1', event_type: 'run_started', timestamp: '2026-08-15T11:00:00.000Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'request_started', request_id: 'req-1', public_message: 'Inspect and validate the input.', timestamp: '2026-08-15T11:00:01.000Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'tool_call', request_id: 'req-1', call_id: 'call-1', tool_name: 'validate_inputs', arguments: { case: 'CASE_GENERIC' }, timestamp: '2026-08-15T11:00:02.000Z', metadata: { module_id: 'INPUT', node_id: 'VALIDATE', invocation_index: 1, retry_index: 0 } },
+  { schema_version: 'external-agent-event-v1', event_type: 'tool_result', request_id: 'req-1', call_id: 'call-1', status: 'success', result: { valid: true }, duration_ms: 1250, timestamp: '2026-08-15T11:00:03.250Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'assistant_message', request_id: 'req-1', public_message: 'Input validation completed.', timestamp: '2026-08-15T11:00:03.500Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'request_completed', request_id: 'req-1', timestamp: '2026-08-15T11:00:04.000Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'request_started', request_id: 'req-2', public_message: 'Write the normalized output.', timestamp: '2026-08-15T11:00:05.000Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'tool_call', request_id: 'req-2', call_id: 'call-2', tool_name: 'write_output', arguments: { path: 'result.json' }, timestamp: '2026-08-15T11:00:06.000Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'tool_result', request_id: 'req-2', call_id: 'call-2', status: 'error', result: { error: 'synthetic write failure' }, duration_ms: 500, timestamp: '2026-08-15T11:00:06.500Z' },
+  { schema_version: 'external-agent-event-v1', event_type: 'run_failed', status: 'failed', message: 'Synthetic generic run failed.', timestamp: '2026-08-15T11:00:07.000Z' },
+]))
+validateRelationalEvents(genericSession.events)
+assertEveryToolFollowsLinkedAssistant(genericSession.events)
+assert.deepEqual(
+  genericSession.events.filter(event => event.type === 'step/start').map(event => event.data.step),
+  [1, 2],
+)
+const genericCalls = genericSession.events.filter(event => event.type === 'tool/call')
+assert.equal(genericCalls.length, 2)
+assert.equal(genericCalls[0]?.data.meta.moduleId, 'INPUT')
+assert.equal(genericCalls[0]?.data.meta.nodeId, 'VALIDATE')
+const genericLedger = unflushedNativeLedgerRecords(genericState)
+assert.ok(genericLedger.every(row => row.agent === 'generic'))
+assert.equal(genericLedger.filter(row => row.event_type === 'tool_call').length, 2)
+assert.deepEqual(genericLedger.filter(row => row.event_type === 'tool_result').map(row => row.duration_ms), [1250, 500])
+assert.equal(genericLedger.filter(row => row.event_type === 'run_terminal').length, 1)
+assert.throws(() => {
+  const invalidState = initializeNativeLiveSession(new MockSession('session-external-trajectory-native-validation-generic-invalid'), {
+    ...genericState.source,
+    id: 'generic-invalid',
+  }, 'C:\\fixture-logs\\generic\\INVALID.jsonl', 'INVALID')
+  appendNativeLiveRecords(invalidState, jsonlRecords([
+    { schema_version: 'external-agent-event-v1', event_type: 'request_started', request_id: 'req-1', public_message: 'Invalid result fixture.' },
+    { schema_version: 'external-agent-event-v1', event_type: 'tool_result', request_id: 'req-1', call_id: 'missing-call', status: 'success', result: {} },
+  ]))
+}, /lacks call/)
+
 const implantPlan = [
   ['t01_segmentation_selection', 'M1', 'T01'],
   ['t02_candidate_generation', 'M2', 'T02'],
@@ -321,16 +375,18 @@ const statsTrace: any = {
     { id: 'implantagent-external', label: 'ImplantAgent', kind: 'codex', workflowMode: 'fixed-modules' },
     { id: 'codex-only', label: 'Codex', kind: 'codex', workflowMode: 'free-form' },
     { id: 'claude-only', label: 'Claude', kind: 'claude', workflowMode: 'free-form' },
+    { id: 'my-external-agent', label: 'My external agent', kind: 'generic', workflowMode: 'free-form' },
   ],
   events: [
     { kind: 'tool', streamId: 'implantagent-external', streamCaseId: 'CASE_FIXED', toolName: 'T10', rawToolName: 'mcp__implantagent__t10_anatomic_safety', status: 'error', errorCategory: 'schema_validation', errorCategoryLabel: 'Schema validation' },
     { kind: 'tool', streamId: 'implantagent-external', streamCaseId: 'CASE_FIXED', toolName: 'T10', rawToolName: 'mcp__implantagent__t10_anatomic_safety', status: 'success' },
     { kind: 'tool', streamId: 'codex-only', streamCaseId: 'CASE_001', toolName: 'Bash', rawToolName: 'Bash', status: 'success' },
     { kind: 'tool', streamId: 'claude-only', streamCaseId: 'CASE_001', toolName: 'Write', rawToolName: 'Write', status: 'success' },
+    { kind: 'tool', streamId: 'my-external-agent', streamCaseId: 'CASE_GENERIC', toolName: 'validate_inputs', rawToolName: 'validate_inputs', status: 'success' },
   ],
 }
 const allStats = buildMonitorStats(statsTrace)
-assert.equal(allStats.arms.length, 3)
+assert.equal(allStats.arms.length, 4)
 assert.equal(allStats.deterministic, true)
 assert.equal(allStats.readOnly, true)
 const implantStats = buildMonitorStats(statsTrace, { agent: 'implantagent', include_errors: true })
@@ -363,6 +419,8 @@ const report = {
   checks: {
     emptyManifestsLoad: true,
     genericExampleManifestLoads: true,
+    genericExternalAgentRequestToolProjection: true,
+    genericExternalAgentFailClosed: true,
     localUserAndCasePathsAbsent: true,
     requestStepsIncrement: true,
     everyToolFollowsLinkedAssistantRequest: true,

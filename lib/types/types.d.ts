@@ -1,7 +1,7 @@
 import type { Stats } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 export type AgentKind = 'codex' | 'claude';
-export type LiveSourceKind = AgentKind | 'implantagent-trace';
+export type LiveSourceKind = AgentKind | 'generic' | 'implantagent-trace';
 export type ProjectionMode = 'default' | 'implantagent-modules';
 export type JsonObject = Record<string, any>;
 export interface HistoricalSource {
@@ -169,6 +169,7 @@ export interface NativeLiveState {
     readonly pendingCodexAssistants: PendingAssistant[];
     readonly pendingClaudeAssistantEvents: JsonObject[];
     currentClaudeMessageId: string | null;
+    currentGenericRequestId: string | null;
     readonly seenClaudeBlocks: Set<string>;
     assistantOrdinal: number;
     resultOrdinal: number;

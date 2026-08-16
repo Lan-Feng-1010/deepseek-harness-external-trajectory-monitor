@@ -1,9 +1,9 @@
 {
   "name": "dsh-external-trajectory-importer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "packageManager": "pnpm@11.7.0",
-  "description": "Read-only live Codex, Claude, and ImplantAgent JSONL trajectory projection and deterministic statistics for DeepSeek Harness.",
+  "description": "Read-only live trajectory projection and deterministic statistics for any external agent process in DeepSeek Harness.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -42,7 +42,9 @@
     "observability",
     "codex",
     "claude",
-    "implantagent"
+    "implantagent",
+    "external-agent",
+    "generic-jsonl"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

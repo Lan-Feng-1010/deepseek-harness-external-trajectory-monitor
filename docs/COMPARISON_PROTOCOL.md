@@ -1,13 +1,14 @@
-# 三智能体可比较轨迹协议
+# 通用外部智能体可比较轨迹协议
 
 ## 设计目标
 
-本协议统一的是可观察执行事实，不统一三个智能体的内部工作流。ImplantAgent 保留固定业务节点，Codex 和 Claude 保留自由工具编排：
+本协议统一的是可观察执行事实，不统一各智能体的内部工作流。ImplantAgent 可保留固定业务节点，Codex、Claude 和其他 agent 可保留自由工具编排：
 
 ```text
 Codex --json ─────────────┐
 Claude stream-json ───────┼─> 只读适配器 ─> 共同执行事实 ─> Harness UI / trajectory_stats
 ImplantAgent tool trace ──┘
+Any agent canonical JSONL ─┘
 ```
 
 原始 JSONL 是 source of truth。适配器不能改工具结果、补造时间、推断隐藏思维，也不能把监视结果反馈给被评价智能体。
@@ -29,12 +30,13 @@ ImplantAgent tool trace ──┘
 | 上下文 | `public_context_before` | 仅公开决策/进展；不包含隐藏 chain-of-thought |
 | 诊断 | `error_category`, `recovery` | 自动分类用于调试；恢复指后续同工具成功，不等于根因已解决 |
 
-normalized ledger v2 还要求每行包含 `sequence`、`source_line`、`source_timestamp`、`observed_at`、`step`、`previous_tool` 和 `next_tool`。下一工具尚未知时不改写旧行，而是等新工具出现后追加一条 `tool_transition`；因此账本始终 append-only。
+normalized ledger v3 还要求每行包含 `sequence`、`source_line`、`source_timestamp`、`observed_at`、`step`、`previous_tool` 和 `next_tool`。下一工具尚未知时不改写旧行，而是等新工具出现后追加一条 `tool_transition`；因此账本始终 append-only。
 
 ## Harness Request 投影
 
 - 所有工具必须先由同一步的 assistant `tool-call` block 声明，再写 `tool/call` 和 `tool/result`；UI 因而呈现 `Request → Tool(s) → next Request`。
 - Claude 以新的 `message.id/request_id` 划分 Request，并把该消息的公开文本与 `tool_use` 放进同一个 assistant message；相同 streaming block 只去重，不重复切 step。
+- 通用 agent 必须使用 `external-agent-event-v1`，以明确的 `request_id` 划分 Request，并用稳定 `call_id` 连接 tool call/result；插件不根据自然语言或调用顺序猜测请求边界。
 - Codex `--json` 缺少 provider request 边界且通常先报告工具、后报告 checkpoint。首个工具使用明确标注的可观察请求锚点；checkpoint 缓存到下一次工具开始时，与下一工具组成新的 Request；终末 checkpoint 单独收尾。该锚点不是隐藏思考或原模型逐字内容。
 - 工具调用开始后必须在同一 step 写入结果。若新的 Claude 消息提前到达，先延迟 Request 切换，直到旧工具关闭。
 - 隐藏 thinking/reasoning 不产生可见 assistant 文本，也不用于补写“思考路径”。
@@ -83,7 +85,7 @@ normalized ledger v2 还要求每行包含 `sequence`、`source_line`、`source_
 
 ## 当前实现边界
 
-ImplantAgent 可以使用显式 `implantagent-tool-trace-v1` 事件，或使用 Codex
+任意外部进程可以使用 `external-agent-event-v1`。ImplantAgent 还可以使用显式 `implantagent-tool-trace-v1` 事件，或使用 Codex
 orchestrator JSONL 中精确匹配的 `mcp__implantagent__...` 调用。只有这两类
 来源能够提供权威 `node_id/module_id`；其他自由工具轨迹不映射到固定节点。
 节点身份不能根据模型文本、调用顺序或后验结果猜测。自动错误标签适合调试

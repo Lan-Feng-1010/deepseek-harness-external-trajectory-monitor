@@ -1,11 +1,12 @@
 # DeepSeek Harness External Trajectory Monitor
 
-DeepSeek Harness 的外部智能体实时轨迹监视插件。它只读观察 Codex CLI、
-Claude CLI 和 ImplantAgent 持续追加的公开 JSONL 事件，并将其投影到 Harness
-原生 Trajectory UI，同时生成可比较的 append-only normalized ledger。
+DeepSeek Harness 的通用外部智能体实时轨迹监视插件。它只读观察任意外部
+agent 进程持续追加的公开 JSONL 事件，并将其投影到 Harness 原生 Trajectory
+UI，同时生成可比较的 append-only normalized ledger。Codex 和 Claude 使用
+内置适配器；其他 agent 使用统一 `external-agent-event-v1` 协议。
 
-当前插件版本：`0.4.0`<br>
-原生实时投影版本：`3.2.0`
+当前插件版本：`0.5.0`<br>
+原生实时投影版本：`4.0.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
 > DeepSeek Harness is still pre-release, so compatibility must be revalidated
@@ -15,6 +16,8 @@ Claude CLI 和 ImplantAgent 持续追加的公开 JSONL 事件，并将其投影
 
 - Watches append-only external JSONL logs without launching or controlling the
   evaluated model.
+- Accepts any external process through `kind: "generic"` and the canonical
+  `external-agent-event-v1` Request/tool event protocol.
 - Creates one native Harness session per external run.
 - Displays increasing purple `Request #N` rows followed by the linked yellow
   Tool rows, including payload, result, status and Harness append timing.
@@ -26,8 +29,9 @@ Claude CLI 和 ImplantAgent 持续追加的公开 JSONL 事件，并将其投影
 - Provides a deterministic read-only `trajectory_stats` tool so a separate
   DeepSeek monitor agent can answer questions about calls, failures and
   observed recovery without guessing counts from a long transcript.
-- Supports explicit ImplantAgent M1-M6/T01-T13 projection when the source emits
-  exact `mcp__implantagent__...` calls. Codex and Claude remain free-form.
+- Keeps Codex/Claude native parsing and supports optional structured workflow
+  overlays such as ImplantAgent M1-M6/T01-T13. Such overlays never define the
+  generic core and never infer nodes from text or call order.
 
 Harness is an observability layer only. The plugin does not modify prompts,
 providers, models, tool allowlists, baselines or agent outputs.
@@ -36,7 +40,7 @@ providers, models, tool allowlists, baselines or agent outputs.
 
 The plugin keeps three distinct layers:
 
-1. Raw Codex/Claude/ImplantAgent JSONL is the source of truth and is never
+1. Raw external-agent JSONL is the source of truth and is never
    written back by the plugin.
 2. `generated-ledgers/*.normalized.jsonl` is an append-only comparison ledger.
 3. Harness Trajectory is the interactive UI projection, not the sole audit
@@ -58,7 +62,7 @@ matching assistant `tool-call` block.
   observational request anchor; later public checkpoints are associated with
   the next tool request. This anchor is not hidden chain-of-thought and is not
   represented as verbatim model text.
-- ImplantAgent module projection is fail-closed. Only the exact registered MCP
+- ImplantAgent module projection is an optional fail-closed overlay. Only the exact registered MCP
   server/tool identities are mapped to M1-M6 and T01-T13. Free-form agents are
   never assigned invented ImplantAgent nodes.
 
@@ -77,7 +81,7 @@ scripts/sanitize-build.ts   Removes local absolute paths from compiled bundles
 cordis.patch.yml            Cordis bundle patch
 runtime-sources.json        Optional historical import manifest; empty by default
 live-sources.json           Active live manifest; empty by default
-live-sources.example.json   Three-agent configuration example
+live-sources.example.json   Generic/Codex/Claude/ImplantAgent examples
 scripts/validate.ts         Synthetic, model-free regression test
 docs/                       Monitor-agent and comparison documentation
 ```
@@ -93,10 +97,10 @@ Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
 
-Version `0.4.0` uses TypeScript authoring for both Host and Client. Harness still
+Version `0.5.0` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
-`trajectory_stats` schema, source manifests, normalized-ledger schema and
-SessionEvent projection contract are unchanged from `0.3.2`.
+`trajectory_stats` tool and SessionEvent projection remain compatible. Version
+`0.5.0` adds the generic source adapter, projection `4.0.0` and ledger schema v3.
 
 Relevant upstream documents:
 
@@ -114,12 +118,17 @@ Important fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | Stable source identity. The example IDs work with monitor-agent aliases. |
-| `kind` | `codex`, `claude`, or non-native `implantagent-trace`. |
+| `kind` | `generic`, `codex`, `claude`, or non-native `implantagent-trace`. |
 | `root` | Directory receiving append-only JSONL files. |
 | `cwd` | External agent workspace shown in the mirrored session metadata. |
 | `nativeSession` | Create a native Harness Trajectory session when true. |
 | `projectionMode` | Use `implantagent-modules` only for exact fixed MCP tool streams. |
 | `ledgerRoot` | Directory for append-only normalized ledgers. |
+
+For any non-Codex/Claude process, set `kind` to `generic` and emit the canonical
+events documented in [docs/GENERIC_AGENT_PROTOCOL.md](docs/GENERIC_AGENT_PROTOCOL.md).
+Each `request_id` becomes one Harness Request step; its tool calls/results appear
+as linked yellow rows beneath it.
 
 The cloud supervisor must continuously synchronize complete JSONL lines into
 `root`. If it uploads only after completion, the final trajectory remains
@@ -171,7 +180,7 @@ Request #2
   Tool C
 ```
 
-Select `[Live Monitor] Codex · Claude · ImplantAgent` and open the observable
+Select `[Live Monitor] External agents` and open the observable
 reasoning page for the cross-agent execution/error comparison.
 
 ## Model-free validation
@@ -182,7 +191,8 @@ The regression test uses synthetic public events only:
 npm run validate
 ```
 
-It verifies increasing request steps, assistant-to-tool linkage, Codex source
+It verifies generic-agent Request/tool projection, increasing request steps,
+assistant-to-tool linkage, Codex source
 time nullability, Claude message deduplication and durations, hidden-thinking
 exclusion, exact ImplantAgent M1-M6/T01-T13 mapping, ledger sequence/tool
 transitions, deterministic statistics and the read-only session guard. It does
