@@ -192,10 +192,91 @@ export interface MonitorStatsArgs {
     readonly tool_name?: string;
     readonly include_errors?: boolean;
 }
+export interface LaunchCaseSpec {
+    readonly caseId: string;
+    readonly templateRoot: string;
+}
+export interface LaunchCommandSpec {
+    readonly executable: string;
+    readonly arguments: readonly string[];
+    readonly cwd: string;
+}
+export interface LaunchSourceTemplate {
+    readonly id: string;
+    readonly label: string;
+    readonly kind: LiveSourceKind;
+    readonly root: string;
+    readonly cwd?: string;
+    readonly suffix?: string;
+    readonly nativeSession?: boolean;
+    readonly provider?: string;
+    readonly model?: string;
+    readonly ledgerRoot: string;
+    readonly projectionMode?: ProjectionMode;
+}
+export interface LaunchPlan {
+    readonly id: string;
+    readonly label: string;
+    readonly enabled: boolean;
+    readonly runRootBase: string;
+    readonly maxConcurrentRuns: number;
+    readonly requiredPaths: readonly string[];
+    readonly requiredEmptyDirectories: readonly string[];
+    readonly cases: readonly LaunchCaseSpec[];
+    readonly command: LaunchCommandSpec;
+    readonly sources: readonly LaunchSourceTemplate[];
+}
+export interface LaunchPlanManifest {
+    readonly schemaVersion: 1;
+    readonly plans: readonly LaunchPlan[];
+}
+export interface RuntimeSourceRegistration extends JsonObject {
+    readonly schemaVersion: 1;
+    readonly runId: string;
+    readonly planId: string;
+    readonly caseId: string;
+    readonly createdAt: string;
+    readonly sources: readonly LiveSource[];
+}
+export type ManagedRunState = 'starting' | 'running' | 'completed' | 'failed' | 'launch_failed';
+export interface ManagedRunRecord extends JsonObject {
+    readonly schemaVersion: 1;
+    readonly runId: string;
+    readonly planId: string;
+    readonly planLabel: string;
+    readonly caseId: string;
+    readonly state: ManagedRunState;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly runRoot: string;
+    readonly registrationPath: string;
+    readonly stdoutPath: string;
+    readonly stderrPath: string;
+    readonly sourceIds: readonly string[];
+    readonly commandSha256: string;
+    readonly processId: number | null;
+    readonly exitCode: number | null;
+    readonly signal: string | null;
+    readonly error: string | null;
+}
+export interface PreexperimentStartArgs {
+    readonly plan_id: string;
+    readonly case_id: string;
+    readonly confirmation: 'START_EXTERNAL_PREEXPERIMENT';
+}
+export interface PreexperimentStatusArgs {
+    readonly run_id?: string;
+    readonly plan_id?: string;
+    readonly case_id?: string;
+}
 export interface PluginConfig {
     readonly manifestPath: string;
     readonly liveManifestPath: string;
     readonly reportPath?: string;
+    readonly enableLaunchTools: boolean;
+    readonly launchPlansPath?: string;
+    readonly runtimeRegistrationRoot?: string;
+    readonly runRegistryRoot?: string;
 }
 export interface ImportReport extends JsonObject {
     schemaVersion: 1;
@@ -207,6 +288,8 @@ export interface ImportReport extends JsonObject {
     nativeSessionSources?: string[];
     liveMonitorStatus?: string;
     liveSources?: JsonObject[];
+    launchToolsEnabled?: boolean;
+    launchPlanCount?: number;
 }
 export interface HarnessContext {
     on(event: string, listener: (...args: any[]) => unknown): void;

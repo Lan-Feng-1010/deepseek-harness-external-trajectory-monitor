@@ -391,7 +391,7 @@ function ObservableReasoningView({ sessionId, useSession }: { sessionId: string;
         setError(reason instanceof Error ? reason.message : String(reason))
       })
     void refresh()
-    const timer = sessionId.includes('live-monitor-v1') ? window.setInterval(() => { void refresh() }, 3000) : undefined
+    const timer = sessionId.includes('live-monitor-') ? window.setInterval(() => { void refresh() }, 3000) : undefined
     return () => {
       controller.abort()
       if (timer !== undefined) window.clearInterval(timer)

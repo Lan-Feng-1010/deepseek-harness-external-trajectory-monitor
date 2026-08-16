@@ -1,13 +1,16 @@
 /** Read-only external-agent trajectory projection for DeepSeek Harness. */
 import type { EventLog, HarnessContext, HarnessSession, HistoricalSource, JsonObject, JsonlRecord, LiveManifest, LiveSource, MonitorStatsArgs, NativeLiveState, NormalizedLedgerRecord, ObservableTrace, SourceManifest } from './types.ts';
 export type { HistoricalSource, JsonlRecord, LedgerFields, LiveSource, MonitorStatsArgs, NativeLiveState, NormalizedLedgerRecord, ObservableTrace, ObservableTraceEvent, PluginConfig, SourceManifest, } from './types.ts';
+export { loadLaunchPlans, loadRuntimeRegistrations, PreexperimentLaunchManager, } from './launch.ts';
 export declare const name = "external-trajectory-importer";
 export declare const inject: string[];
-export declare const LIVE_MONITOR_SESSION_ID = "session-external-trajectory-live-monitor-v3-2";
-export declare const NATIVE_LIVE_PROJECTION_VERSION = "4.2.0";
+export declare const LIVE_MONITOR_SESSION_ID = "session-external-trajectory-live-monitor-v4-3";
+export declare const NATIVE_LIVE_PROJECTION_VERSION = "4.3.0";
 export declare const NORMALIZED_LEDGER_SCHEMA = "external-trajectory-ledger-v3";
 export declare function loadManifest(path?: string): Promise<SourceManifest>;
+export declare function validateLiveSource(source: JsonObject, index: number): LiveSource;
 export declare function loadLiveManifest(path?: string): Promise<LiveManifest>;
+export declare function loadCombinedLiveManifest(path?: string, runtimeRegistrationRoot?: string): Promise<LiveManifest>;
 export declare function nativeLiveSessionId(source: LiveSource, path: string, caseId: string): string;
 export declare function initializeNativeLiveSession(session: HarnessSession, source: LiveSource, path: string, caseId: string): NativeLiveState;
 export declare function appendNativeLiveRecords(state: NativeLiveState, records: readonly JsonlRecord[]): number;
@@ -21,6 +24,14 @@ export declare function readonlyImportedSessionGuard({ agent }: {
     agent?: {
         session?: {
             id?: string;
+        };
+    };
+}, next: () => unknown | Promise<unknown>): Promise<unknown>;
+export declare function monitorControlToolGuard(exec: {
+    readonly name?: string;
+    readonly agent?: {
+        readonly session?: {
+            readonly id?: string;
         };
     };
 }, next: () => unknown | Promise<unknown>): Promise<unknown>;

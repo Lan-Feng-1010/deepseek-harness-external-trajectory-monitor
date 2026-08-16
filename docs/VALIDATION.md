@@ -2,8 +2,8 @@
 
 ## Current package
 
-- Plugin version: `0.5.2`
-- Native live projection: `4.2.0`
+- Plugin version: `0.6.0`
+- Native live projection: `4.3.0`
 - Normalized ledger schema: `external-trajectory-ledger-v3`
 - Initially accepted Harness revision: `0.1.0-rc.5`, commit
   `47f943859bef60e4160492346772ded9b24f765a`
@@ -30,12 +30,15 @@ events. It verifies:
 - raw MCP tool name, module ID, node ID and duration preservation;
 - contiguous append-only ledger sequence and tool transitions;
 - deterministic `trajectory_stats` filtering;
-- mirrored-session execution guard.
+- mirrored-session execution guard;
+- combined-monitor tool allowlist and mandatory start approval;
+- a synthetic trusted-supervisor launch through a fresh copied run root;
+- runtime source registration before observation and terminal launcher status.
 
-The `0.5.2` release keeps the Cordis ID and plugin entrypoints while adding
-native ImplantAgent v0.8 trace support, retry-aware call identity and
-live-manifest hot reload. The generic
-live adapter and ledger v3 remain unchanged. The synthetic regression is executed against
+The `0.6.0` release keeps the Cordis ID and plugin entrypoints while adding an
+optional allowlisted managed-launch layer. Native ImplantAgent v0.8 trace
+support, retry-aware call identity, live-manifest hot reload, the generic
+adapter and ledger v3 remain unchanged. The synthetic regression is executed against
 the compiled JavaScript package export, rather than importing the TypeScript
 source directly.
 
@@ -47,6 +50,8 @@ versions.
 ## Explicitly not validated by this test
 
 - No external agent, Codex, Claude or DeepSeek model is started.
+- The managed-launch test starts only a local Node fixture that writes two
+  synthetic terminal JSONL records.
 - No clinical/patient case is run.
 - No claim about planning quality or clinical correctness is made.
 - No cross-agent latency comparison is made when sources lack comparable event

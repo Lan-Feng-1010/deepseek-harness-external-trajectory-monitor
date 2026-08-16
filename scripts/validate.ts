@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -7,10 +8,16 @@ import {
   appendNativeLiveRecords,
   buildMonitorStats,
   initializeNativeLiveSession,
+  LIVE_MONITOR_SESSION_ID,
+  loadCombinedLiveManifest,
+  loadLaunchPlans,
   loadLiveManifest,
   loadManifest,
+  loadRuntimeRegistrations,
+  monitorControlToolGuard,
   NATIVE_LIVE_PROJECTION_VERSION,
   NORMALIZED_LEDGER_SCHEMA,
+  PreexperimentLaunchManager,
   readonlyImportedSessionGuard,
   unflushedNativeLedgerRecords,
 } from 'dsh-external-trajectory-importer'
@@ -131,11 +138,14 @@ assert.deepEqual(exampleManifest.sources.map(source => source.id), [
 assert.ok(exampleManifest.sources.every(source => source.cwd.startsWith('C:\\agent-workspaces\\')))
 const publishableText = await Promise.all([
   'src/index.ts',
+  'src/launch.ts',
   'lib/index.js',
   'lib/client.js',
   'tsdown.config.ts',
+  'launch-plans.example.json',
   'README.md',
   'docs/GENERIC_AGENT_PROTOCOL.md',
+  'docs/MANAGED_PREEXPERIMENTS.md',
 ].map(path => readFile(join(packageRoot, path), 'utf8')))
 const forbiddenLocalFragments = [
   ['HUA', 'WEI'].join(''),
@@ -457,6 +467,128 @@ const passed = await readonlyImportedSessionGuard(
 assert.deepEqual(passed, { kind: 'enter' })
 assert.equal(nextCalls, 1)
 
+const monitorSessionPassed = await readonlyImportedSessionGuard(
+  { agent: { session: { id: LIVE_MONITOR_SESSION_ID } } },
+  async () => { nextCalls += 1; return { kind: 'enter' } },
+)
+assert.deepEqual(monitorSessionPassed, { kind: 'enter' })
+const launchApproval = await monitorControlToolGuard(
+  { name: 'external_preexperiment_start', agent: { session: { id: LIVE_MONITOR_SESSION_ID } } },
+  async () => ({ kind: 'enter' }),
+)
+assert.equal((launchApproval as { kind: string }).kind, 'ask')
+const monitorStatsPassed = await monitorControlToolGuard(
+  { name: 'trajectory_stats', agent: { session: { id: LIVE_MONITOR_SESSION_ID } } },
+  async () => ({ kind: 'enter' }),
+)
+assert.deepEqual(monitorStatsPassed, { kind: 'enter' })
+const monitorShellDenied = await monitorControlToolGuard(
+  { name: 'terminal', agent: { session: { id: LIVE_MONITOR_SESSION_ID } } },
+  async () => ({ kind: 'enter' }),
+)
+assert.equal((monitorShellDenied as { kind: string }).kind, 'deny')
+
+const launchFixtureRoot = await mkdtemp(join(tmpdir(), 'dsh-external-launch-'))
+try {
+  const templateRoot = join(launchFixtureRoot, 'template')
+  const runRootBase = join(launchFixtureRoot, 'runs')
+  const registrationRoot = join(launchFixtureRoot, 'registrations')
+  const runRegistryRoot = join(launchFixtureRoot, 'registry')
+  const plansPath = join(launchFixtureRoot, 'launch-plans.json')
+  const baseManifestPath = join(launchFixtureRoot, 'base-live-sources.json')
+  await Promise.all([
+    mkdir(join(templateRoot, 'logs', 'codex'), { recursive: true }),
+    mkdir(join(templateRoot, 'logs', 'claude'), { recursive: true }),
+    mkdir(join(templateRoot, 'ledgers', 'codex'), { recursive: true }),
+    mkdir(join(templateRoot, 'ledgers', 'claude'), { recursive: true }),
+  ])
+  await writeFile(join(templateRoot, 'required.txt'), 'synthetic fixture\n', 'utf8')
+  await writeFile(join(templateRoot, 'synthetic-supervisor.mjs'), [
+    "import { appendFileSync } from 'node:fs'",
+    "import { join } from 'node:path'",
+    'const root = process.argv[2]',
+    "appendFileSync(join(root, 'logs', 'codex', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'turn.completed', usage: {} }) + '\\n')",
+    "appendFileSync(join(root, 'logs', 'claude', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'result', subtype: 'success', is_error: false }) + '\\n')",
+  ].join('\n'), 'utf8')
+  await writeFile(baseManifestPath, `${JSON.stringify({ schemaVersion: 1, sources: [] }, null, 2)}\n`, 'utf8')
+  const planDocument = {
+    schemaVersion: 1,
+    plans: [{
+      id: 'fixture-sequential',
+      label: 'Synthetic sequential external agents',
+      enabled: true,
+      runRootBase,
+      maxConcurrentRuns: 1,
+      requiredPaths: ['required.txt', 'synthetic-supervisor.mjs'],
+      requiredEmptyDirectories: ['logs/codex', 'logs/claude', 'ledgers/codex', 'ledgers/claude'],
+      cases: [{ caseId: 'CASE_FIXTURE', templateRoot }],
+      command: {
+        executable: process.execPath,
+        arguments: ['{run_root}\\synthetic-supervisor.mjs', '{run_root}'],
+        cwd: '{run_root}',
+      },
+      sources: [
+        {
+          id: '{run_id}-codex',
+          label: 'Codex synthetic fixture',
+          kind: 'codex',
+          root: '{run_root}\\logs\\codex',
+          cwd: '{run_root}',
+          provider: 'codex-cli',
+          model: 'fixture-no-model',
+          ledgerRoot: '{run_root}\\ledgers\\codex',
+        },
+        {
+          id: '{run_id}-claude',
+          label: 'Claude synthetic fixture',
+          kind: 'claude',
+          root: '{run_root}\\logs\\claude',
+          cwd: '{run_root}',
+          provider: 'claude-cli',
+          model: 'fixture-no-model',
+          ledgerRoot: '{run_root}\\ledgers\\claude',
+        },
+      ],
+    }],
+  }
+  await writeFile(plansPath, `${JSON.stringify(planDocument, null, 2)}\n`, 'utf8')
+  assert.equal((await loadLaunchPlans(plansPath)).plans.length, 1)
+  const launchManager = new PreexperimentLaunchManager({ plansPath, registrationRoot, runRegistryRoot })
+  const catalog = await launchManager.catalog()
+  assert.deepEqual(catalog.plans[0]?.cases, ['CASE_FIXTURE'])
+  assert.ok(!JSON.stringify(catalog).includes('synthetic-supervisor'))
+  await assert.rejects(
+    launchManager.start({ plan_id: 'fixture-sequential', case_id: 'CASE_FIXTURE', confirmation: 'INVALID' as 'START_EXTERNAL_PREEXPERIMENT' }),
+    /confirmation/,
+  )
+  const startedRun = await launchManager.start({
+    plan_id: 'fixture-sequential',
+    case_id: 'CASE_FIXTURE',
+    confirmation: 'START_EXTERNAL_PREEXPERIMENT',
+  })
+  assert.equal(startedRun.state, 'running')
+  assert.notEqual(startedRun.runRoot, templateRoot)
+  assert.ok(startedRun.commandSha256.length === 64)
+  let finalStatus = await launchManager.status({ run_id: startedRun.runId })
+  for (let attempt = 0; attempt < 200 && !finalStatus.runs[0]?.terminalStateVerified; attempt += 1) {
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 25))
+    finalStatus = await launchManager.status({ run_id: startedRun.runId })
+  }
+  assert.equal(finalStatus.runs[0]?.record.state, 'completed')
+  assert.equal(finalStatus.runs[0]?.record.exitCode, 0)
+  assert.ok(finalStatus.runs[0]?.observedSources.every(source => source.rootExists === true))
+  assert.deepEqual(await readdir(join(templateRoot, 'logs', 'codex')), [])
+  assert.deepEqual(await readdir(join(templateRoot, 'logs', 'claude')), [])
+  const registrations = await loadRuntimeRegistrations(registrationRoot)
+  assert.equal(registrations.length, 1)
+  assert.equal(registrations[0]?.sources.length, 2)
+  const combined = await loadCombinedLiveManifest(baseManifestPath, registrationRoot)
+  assert.equal(combined.sources.length, 2)
+  assert.ok(combined.sources.every(source => source.root.startsWith(startedRun.runRoot)))
+} finally {
+  await rm(launchFixtureRoot, { recursive: true, force: true })
+}
+
 const report = {
   schemaVersion: 1,
   validatedAt: new Date().toISOString(),
@@ -487,6 +619,12 @@ const report = {
     normalizedLedgerSequencesValid: true,
     deterministicStatsValidated: true,
     mirroredSessionExecutionGuarded: true,
+    combinedMonitorToolAllowlistValidated: true,
+    managedLaunchHumanApprovalHookValidated: true,
+    managedLaunchCatalogDoesNotExposeCommands: true,
+    managedLaunchCreatesFreshRunRoot: true,
+    managedLaunchRegistersSourcesBeforeObservation: true,
+    managedLaunchRunsOnlySyntheticSupervisor: true,
   },
 }
 

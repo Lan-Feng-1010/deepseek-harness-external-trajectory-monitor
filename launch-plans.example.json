@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "plans": [
+    {
+      "id": "codex-claude-preexperiment",
+      "label": "Codex and Claude sequential preexperiment",
+      "enabled": false,
+      "runRootBase": "C:\\external-agent-runs",
+      "maxConcurrentRuns": 1,
+      "requiredPaths": [
+        "pilot_case_manifest.csv",
+        "pilot_supervisor_config.json",
+        "runtime\\run-both-agents.ps1"
+      ],
+      "requiredEmptyDirectories": [
+        "supervisor_logs\\codex",
+        "supervisor_logs\\claude",
+        "output_codex",
+        "output_claude"
+      ],
+      "cases": [
+        {
+          "caseId": "CASE_001",
+          "templateRoot": "C:\\prepared-preexperiments\\CASE_001"
+        }
+      ],
+      "command": {
+        "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "arguments": [
+          "-NoLogo",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "{run_root}\\runtime\\run-both-agents.ps1",
+          "-PackageRoot",
+          "{run_root}",
+          "-RunId",
+          "{run_id}"
+        ],
+        "cwd": "{run_root}"
+      },
+      "sources": [
+        {
+          "id": "managed-{run_id}-codex",
+          "label": "Codex · {case_id} · {run_id}",
+          "kind": "codex",
+          "root": "{run_root}\\supervisor_logs\\codex",
+          "cwd": "{run_root}",
+          "suffix": "_events.jsonl",
+          "nativeSession": true,
+          "provider": "codex-cli",
+          "model": "configured-by-trusted-supervisor",
+          "ledgerRoot": "{run_root}\\normalized_ledgers\\codex"
+        },
+        {
+          "id": "managed-{run_id}-claude",
+          "label": "Claude · {case_id} · {run_id}",
+          "kind": "claude",
+          "root": "{run_root}\\supervisor_logs\\claude",
+          "cwd": "{run_root}",
+          "suffix": "_events.jsonl",
+          "nativeSession": true,
+          "provider": "claude-cli",
+          "model": "configured-by-trusted-supervisor",
+          "ledgerRoot": "{run_root}\\normalized_ledgers\\claude"
+        }
+      ]
+    }
+  ]
+}

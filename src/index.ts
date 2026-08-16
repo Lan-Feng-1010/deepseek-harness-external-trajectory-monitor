@@ -4,6 +4,11 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  loadLaunchPlans,
+  loadRuntimeRegistrations,
+  PreexperimentLaunchManager,
+} from './launch.ts'
 import type {
   EventLog,
   HarnessContext,
@@ -23,6 +28,8 @@ import type {
   NormalizedLedgerRecord,
   ObservableTrace,
   ObservableTraceEvent,
+  PreexperimentStartArgs,
+  PreexperimentStatusArgs,
   PluginConfig,
   RunRecord,
   SourceManifest,
@@ -42,6 +49,11 @@ export type {
   PluginConfig,
   SourceManifest,
 } from './types.ts'
+export {
+  loadLaunchPlans,
+  loadRuntimeRegistrations,
+  PreexperimentLaunchManager,
+} from './launch.ts'
 
 export const name = 'external-trajectory-importer'
 export const inject = ['sessions', 'sessionPersistence', 'webServer', 'tools']
@@ -49,9 +61,12 @@ export const inject = ['sessions', 'sessionPersistence', 'webServer', 'tools']
 const DEFAULT_MANIFEST_PATH = fileURLToPath(new URL('./sources.json', import.meta.url))
 const DEFAULT_LIVE_MANIFEST_PATH = fileURLToPath(new URL('./live-sources.json', import.meta.url))
 const DEFAULT_LEDGER_ROOT = fileURLToPath(new URL('./generated-ledgers', import.meta.url))
+const DEFAULT_LAUNCH_PLANS_PATH = fileURLToPath(new URL('./launch-plans.json', import.meta.url))
+const DEFAULT_RUNTIME_REGISTRATION_ROOT = fileURLToPath(new URL('./runtime-registrations', import.meta.url))
+const DEFAULT_RUN_REGISTRY_ROOT = fileURLToPath(new URL('./managed-runs', import.meta.url))
 const SESSION_PREFIX = 'session-external-trajectory-'
-export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v3-2`
-export const NATIVE_LIVE_PROJECTION_VERSION = '4.2.0'
+export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v4-3`
+export const NATIVE_LIVE_PROJECTION_VERSION = '4.3.0'
 export const NORMALIZED_LEDGER_SCHEMA = 'external-trajectory-ledger-v3'
 const TRACE_ROUTE = '/api/external-reasoning-trace'
 const TOOL_ITEM_TYPES = new Set(['command_execution', 'file_change', 'web_search', 'mcp_tool_call'])
@@ -191,7 +206,7 @@ export async function loadManifest(path = DEFAULT_MANIFEST_PATH): Promise<Source
   return { schemaVersion: 1, sessions: manifest.sessions.map(validateSource) }
 }
 
-function validateLiveSource(source: JsonObject, index: number): LiveSource {
+export function validateLiveSource(source: JsonObject, index: number): LiveSource {
   if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error(`live sources[${index}] must be an object`)
   }
@@ -232,6 +247,26 @@ export async function loadLiveManifest(path = DEFAULT_LIVE_MANIFEST_PATH): Promi
     throw new Error('live trajectory source manifest must use schemaVersion 1 and contain a sources array')
   }
   return { schemaVersion: 1, sources: manifest.sources.map(validateLiveSource) }
+}
+
+export async function loadCombinedLiveManifest(
+  path = DEFAULT_LIVE_MANIFEST_PATH,
+  runtimeRegistrationRoot?: string,
+): Promise<LiveManifest> {
+  const base = await loadLiveManifest(path)
+  if (runtimeRegistrationRoot === undefined) return base
+  const registrations = await loadRuntimeRegistrations(runtimeRegistrationRoot)
+  const sources = [...base.sources]
+  const ids = new Set(sources.map(source => source.id))
+  for (const registration of registrations) {
+    for (const [index, rawSource] of registration.sources.entries()) {
+      const source = validateLiveSource(rawSource, index)
+      if (ids.has(source.id)) throw new Error(`runtime registration source ID collides with an existing source: ${source.id}`)
+      ids.add(source.id)
+      sources.push(source)
+    }
+  }
+  return { schemaVersion: 1, sources }
 }
 
 function makeEventLog(): EventLog {
@@ -2685,11 +2720,35 @@ export function isImportedSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === 'string' && sessionId.startsWith(SESSION_PREFIX)
 }
 
+const MONITOR_CONTROL_TOOLS = new Set([
+  'trajectory_stats',
+  'external_preexperiment_catalog',
+  'external_preexperiment_start',
+  'external_preexperiment_status',
+])
+
 export async function readonlyImportedSessionGuard(
   { agent }: { agent?: { session?: { id?: string } } },
   next: () => unknown | Promise<unknown>,
 ): Promise<unknown> {
-  if (isImportedSessionId(agent?.session?.id)) return { kind: 'reject' }
+  if (isImportedSessionId(agent?.session?.id) && agent?.session?.id !== LIVE_MONITOR_SESSION_ID) return { kind: 'reject' }
+  return next()
+}
+
+export async function monitorControlToolGuard(
+  exec: { readonly name?: string; readonly agent?: { readonly session?: { readonly id?: string } } },
+  next: () => unknown | Promise<unknown>,
+): Promise<unknown> {
+  const toolName = exec.name
+  if (toolName === 'external_preexperiment_start') {
+    return {
+      kind: 'ask',
+      reason: 'Start one allowlisted external preexperiment. The trusted supervisor, not DeepSeek, will execute the configured external agents.',
+    }
+  }
+  if (exec.agent?.session?.id === LIVE_MONITOR_SESSION_ID && (toolName === undefined || !MONITOR_CONTROL_TOOLS.has(toolName))) {
+    return { kind: 'deny', reason: 'The combined monitor session permits only catalog, start, status and trajectory statistics tools.' }
+  }
   return next()
 }
 
@@ -2729,7 +2788,11 @@ export async function prepareImport(source: HistoricalSource) {
 }
 
 function validateConfig(config: unknown): PluginConfig {
-  if (config === undefined) return { manifestPath: DEFAULT_MANIFEST_PATH, liveManifestPath: DEFAULT_LIVE_MANIFEST_PATH }
+  if (config === undefined) return {
+    manifestPath: DEFAULT_MANIFEST_PATH,
+    liveManifestPath: DEFAULT_LIVE_MANIFEST_PATH,
+    enableLaunchTools: false,
+  }
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('external trajectory importer config must be an object')
   }
@@ -2743,13 +2806,36 @@ function validateConfig(config: unknown): PluginConfig {
   const reportPath = candidate.reportPath === undefined
     ? undefined
     : requireNonEmptyString(candidate.reportPath, 'reportPath')
-  if (!isAbsolute(manifestPath) || !isAbsolute(liveManifestPath) || (reportPath !== undefined && !isAbsolute(reportPath))) {
-    throw new Error('manifestPath, liveManifestPath and reportPath must be absolute when configured')
+  const enableLaunchTools = candidate.enableLaunchTools === true
+  const launchPlansPath = candidate.launchPlansPath === undefined
+    ? DEFAULT_LAUNCH_PLANS_PATH
+    : requireNonEmptyString(candidate.launchPlansPath, 'launchPlansPath')
+  const runtimeRegistrationRoot = candidate.runtimeRegistrationRoot === undefined
+    ? DEFAULT_RUNTIME_REGISTRATION_ROOT
+    : requireNonEmptyString(candidate.runtimeRegistrationRoot, 'runtimeRegistrationRoot')
+  const runRegistryRoot = candidate.runRegistryRoot === undefined
+    ? DEFAULT_RUN_REGISTRY_ROOT
+    : requireNonEmptyString(candidate.runRegistryRoot, 'runRegistryRoot')
+  if (
+    !isAbsolute(manifestPath)
+    || !isAbsolute(liveManifestPath)
+    || (reportPath !== undefined && !isAbsolute(reportPath))
+    || !isAbsolute(launchPlansPath)
+    || !isAbsolute(runtimeRegistrationRoot)
+    || !isAbsolute(runRegistryRoot)
+  ) {
+    throw new Error('all configured manifest, report, launch and runtime registry paths must be absolute')
   }
   return {
     manifestPath: resolve(manifestPath),
     liveManifestPath: resolve(liveManifestPath),
+    enableLaunchTools,
     ...(reportPath === undefined ? {} : { reportPath: resolve(reportPath) }),
+    ...(enableLaunchTools ? {
+      launchPlansPath: resolve(launchPlansPath),
+      runtimeRegistrationRoot: resolve(runtimeRegistrationRoot),
+      runRegistryRoot: resolve(runRegistryRoot),
+    } : {}),
   }
 }
 
@@ -2760,11 +2846,11 @@ export function liveMonitorSeed(time: number): EventLog['events'] {
   log.append('user/message', time, {
     id: `${LIVE_MONITOR_SESSION_ID}-notice`,
     role: 'user',
-    content: [{ type: 'text', text: 'Read-only live monitor for any configured external agent public Request and tool trajectory. Codex and Claude use native adapters; other processes use external-agent-event-v1 JSONL. No model is run by this session.' }],
-    source: { kind: 'plugin', plugin: name, form: 'notice', summary: 'External agents live monitor' },
+    content: [{ type: 'text', text: 'Combined external-agent control and live-monitor session. DeepSeek may call only the allowlisted catalog/start/status/statistics tools. A human approval is required before a trusted supervisor starts any external preexperiment. Codex, Claude or another registered external agent performs the evaluated work; their raw JSONL remains separate and append-only.' }],
+    source: { kind: 'plugin', plugin: name, form: 'notice', summary: 'External agents control and live monitor' },
   }, { surfaceOp: 'append' })
   log.append('session/title', time, {
-    title: '[Live Monitor] External agents',
+    title: '[Live Control + Monitor] External agents',
     messageSeqs: [],
     source: { kind: 'user' },
   })
@@ -2775,9 +2861,21 @@ export function liveMonitorSeed(time: number): EventLog['events'] {
 export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<void> {
   const config = validateConfig(rawConfig)
   ctx.on('agent/pre-step', readonlyImportedSessionGuard)
+  ctx.on('tools/pre-execute', monitorControlToolGuard)
 
   const manifest = await loadManifest(config.manifestPath)
-  let liveManifest = await loadLiveManifest(config.liveManifestPath)
+  const launchManager = config.enableLaunchTools
+    && config.launchPlansPath !== undefined
+    && config.runtimeRegistrationRoot !== undefined
+    && config.runRegistryRoot !== undefined
+    ? new PreexperimentLaunchManager({
+        plansPath: config.launchPlansPath,
+        registrationRoot: config.runtimeRegistrationRoot,
+        runRegistryRoot: config.runRegistryRoot,
+      })
+    : null
+  const launchPlans = launchManager === null ? null : await loadLaunchPlans(config.launchPlansPath as string)
+  let liveManifest = await loadCombinedLiveManifest(config.liveManifestPath, config.runtimeRegistrationRoot)
   ctx.tools.register({
     name: 'trajectory_stats',
     description: 'Read-only deterministic statistics for all configured external-agent trajectories. Use this tool to count calls, compare failures and recovery, or filter by source/case/tool. It never runs or changes an evaluated agent and never exposes hidden chain-of-thought.',
@@ -2796,10 +2894,73 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
       render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args: MonitorStatsArgs) {
-      liveManifest = await loadLiveManifest(config.liveManifestPath)
+      liveManifest = await loadCombinedLiveManifest(config.liveManifestPath, config.runtimeRegistrationRoot)
       return buildMonitorStats(await buildLiveMonitorTrace(liveManifest), args)
     },
   })
+  if (launchManager !== null) {
+    ctx.tools.register({
+      name: 'external_preexperiment_catalog',
+      description: 'List enabled, preconfigured external preexperiment plans and allowlisted cases. This is read-only and never exposes commands, credentials or patient files.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      output: {
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
+      presentCall: () => ({ card: 'generic', title: 'List external preexperiment plans', kind: 'read' }),
+      async execute() {
+        return launchManager.catalog()
+      },
+    })
+    ctx.tools.register({
+      name: 'external_preexperiment_start',
+      description: 'After human approval, start one allowlisted fresh external preexperiment through its trusted supervisor. DeepSeek cannot supply or alter executable, arguments, model, provider, prompt, tools or source paths.',
+      parameters: {
+        type: 'object',
+        properties: {
+          plan_id: { type: 'string', description: 'Exact enabled plan ID returned by external_preexperiment_catalog.' },
+          case_id: { type: 'string', description: 'Exact allowlisted case ID returned by external_preexperiment_catalog.' },
+          confirmation: { type: 'string', enum: ['START_EXTERNAL_PREEXPERIMENT'], description: 'Required exact confirmation string.' },
+        },
+        required: ['plan_id', 'case_id', 'confirmation'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
+      presentCall: (args: PreexperimentStartArgs) => ({
+        card: 'generic',
+        title: `Start external preexperiment ${args.plan_id} for ${args.case_id}`,
+        kind: 'execute',
+        rawInput: { plan_id: args.plan_id, case_id: args.case_id },
+      }),
+      async execute(args: PreexperimentStartArgs) {
+        return launchManager.start(args)
+      },
+    })
+    ctx.tools.register({
+      name: 'external_preexperiment_status',
+      description: 'Read managed external preexperiment launcher state and registered observable sources. This does not infer clinical success or hidden reasoning.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Optional exact managed run ID.' },
+          plan_id: { type: 'string', description: 'Optional exact launch plan ID.' },
+          case_id: { type: 'string', description: 'Optional exact case ID.' },
+        },
+        additionalProperties: false,
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
+      presentCall: () => ({ card: 'generic', title: 'Read external preexperiment status', kind: 'read' }),
+      async execute(args: PreexperimentStatusArgs) {
+        return launchManager.status(args)
+      },
+    })
+  }
   const existing = new Set((await ctx.sessionPersistence.list()).map(header => header.id))
   const traceBodies = new Map<string, string>()
   let liveCache = { expiresAt: 0, body: '' }
@@ -2810,6 +2971,8 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
     sourceFilesModified: 0,
     monitorTool: 'trajectory_stats',
     sessions: [],
+    launchToolsEnabled: launchManager !== null,
+    launchPlanCount: launchPlans?.plans.filter(plan => plan.enabled).length ?? 0,
   }
 
   for (const source of manifest.sessions) {
@@ -2850,7 +3013,7 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
     if (nativeTickRunning) return
     nativeTickRunning = true
     try {
-      liveManifest = await loadLiveManifest(config.liveManifestPath)
+      liveManifest = await loadCombinedLiveManifest(config.liveManifestPath, config.runtimeRegistrationRoot)
       for (const source of liveManifest.sources.filter(item => item.nativeSession)) {
         const latest = await latestLiveFile(source)
         if (latest === null) continue
@@ -2954,7 +3117,7 @@ export async function apply(ctx: HarnessContext, rawConfig: unknown): Promise<vo
       if (sessionId === LIVE_MONITOR_SESSION_ID) {
         const now = Date.now()
         if (liveCache.expiresAt <= now) {
-          liveManifest = await loadLiveManifest(config.liveManifestPath)
+          liveManifest = await loadCombinedLiveManifest(config.liveManifestPath, config.runtimeRegistrationRoot)
           liveCache = {
             expiresAt: now + 1500,
             body: JSON.stringify(await buildLiveMonitorTrace(liveManifest)),

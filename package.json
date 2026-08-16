@@ -1,9 +1,9 @@
 {
   "name": "dsh-external-trajectory-importer",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "private": true,
   "packageManager": "pnpm@11.7.0",
-  "description": "Read-only live trajectory projection and deterministic statistics for any external agent process in DeepSeek Harness.",
+  "description": "Allowlisted external-agent launch, live trajectory projection, and deterministic statistics for DeepSeek Harness.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -28,6 +28,8 @@
     "runtime-sources.json",
     "live-sources.json",
     "live-sources.example.json",
+    "launch-plans.json",
+    "launch-plans.example.json",
     "README.md",
     "SECURITY.md",
     "docs"
