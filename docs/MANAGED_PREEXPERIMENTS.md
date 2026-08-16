@@ -22,7 +22,8 @@ provider, model, prompt, tools or baseline.
 1. `external_preexperiment_catalog` returns enabled plan labels, case IDs and
    non-sensitive source metadata.
 2. `external_preexperiment_start` validates the selection and concurrent-run
-   limit.
+   limit. A global managed-run lock also rejects a second plan while any first
+   plan is still running.
 3. The plugin verifies required template paths and empty runtime directories.
 4. It copies the template to a unique child of `runRootBase`.
 5. It expands source paths, verifies that they stay inside the fresh run root,
@@ -50,6 +51,12 @@ Every expanded source root, working directory and ledger root must stay inside
 `{run_root}`. Plans with unsupported tokens, unsafe relative paths, missing
 required files or non-empty template runtime directories are rejected before a
 child process starts.
+
+Use separate enabled plans for Codex-only, Claude-only, ImplantAgent-only and
+any reviewed fixed sequence. These are choices, not prerequisites: one agent's
+plan does not gate another. Arbitrary ordering is supported by starting a
+single-agent plan only after the previous single-agent plan reaches a terminal
+state; global serialization prevents accidental overlap.
 
 ## What automatic means
 

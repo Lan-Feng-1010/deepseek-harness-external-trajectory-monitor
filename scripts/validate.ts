@@ -509,50 +509,55 @@ try {
     'const root = process.argv[2]',
     "appendFileSync(join(root, 'logs', 'codex', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'turn.completed', usage: {} }) + '\\n')",
     "appendFileSync(join(root, 'logs', 'claude', 'CASE_FIXTURE_events.jsonl'), JSON.stringify({ type: 'result', subtype: 'success', is_error: false }) + '\\n')",
+    'await new Promise(resolve => setTimeout(resolve, 400))',
   ].join('\n'), 'utf8')
   await writeFile(baseManifestPath, `${JSON.stringify({ schemaVersion: 1, sources: [] }, null, 2)}\n`, 'utf8')
+  const fixturePlan = {
+    id: 'fixture-sequential',
+    label: 'Synthetic sequential external agents',
+    enabled: true,
+    runRootBase,
+    maxConcurrentRuns: 1,
+    requiredPaths: ['required.txt', 'synthetic-supervisor.mjs'],
+    requiredEmptyDirectories: ['logs/codex', 'logs/claude', 'ledgers/codex', 'ledgers/claude'],
+    cases: [{ caseId: 'CASE_FIXTURE', templateRoot }],
+    command: {
+      executable: process.execPath,
+      arguments: ['{run_root}\\synthetic-supervisor.mjs', '{run_root}'],
+      cwd: '{run_root}',
+    },
+    sources: [
+      {
+        id: '{run_id}-codex',
+        label: 'Codex synthetic fixture',
+        kind: 'codex',
+        root: '{run_root}\\logs\\codex',
+        cwd: '{run_root}',
+        provider: 'codex-cli',
+        model: 'fixture-no-model',
+        ledgerRoot: '{run_root}\\ledgers\\codex',
+      },
+      {
+        id: '{run_id}-claude',
+        label: 'Claude synthetic fixture',
+        kind: 'claude',
+        root: '{run_root}\\logs\\claude',
+        cwd: '{run_root}',
+        provider: 'claude-cli',
+        model: 'fixture-no-model',
+        ledgerRoot: '{run_root}\\ledgers\\claude',
+      },
+    ],
+  }
   const planDocument = {
     schemaVersion: 1,
-    plans: [{
-      id: 'fixture-sequential',
-      label: 'Synthetic sequential external agents',
-      enabled: true,
-      runRootBase,
-      maxConcurrentRuns: 1,
-      requiredPaths: ['required.txt', 'synthetic-supervisor.mjs'],
-      requiredEmptyDirectories: ['logs/codex', 'logs/claude', 'ledgers/codex', 'ledgers/claude'],
-      cases: [{ caseId: 'CASE_FIXTURE', templateRoot }],
-      command: {
-        executable: process.execPath,
-        arguments: ['{run_root}\\synthetic-supervisor.mjs', '{run_root}'],
-        cwd: '{run_root}',
-      },
-      sources: [
-        {
-          id: '{run_id}-codex',
-          label: 'Codex synthetic fixture',
-          kind: 'codex',
-          root: '{run_root}\\logs\\codex',
-          cwd: '{run_root}',
-          provider: 'codex-cli',
-          model: 'fixture-no-model',
-          ledgerRoot: '{run_root}\\ledgers\\codex',
-        },
-        {
-          id: '{run_id}-claude',
-          label: 'Claude synthetic fixture',
-          kind: 'claude',
-          root: '{run_root}\\logs\\claude',
-          cwd: '{run_root}',
-          provider: 'claude-cli',
-          model: 'fixture-no-model',
-          ledgerRoot: '{run_root}\\ledgers\\claude',
-        },
-      ],
-    }],
+    plans: [
+      fixturePlan,
+      { ...fixturePlan, id: 'fixture-secondary', label: 'Second synthetic external agent plan' },
+    ],
   }
   await writeFile(plansPath, `${JSON.stringify(planDocument, null, 2)}\n`, 'utf8')
-  assert.equal((await loadLaunchPlans(plansPath)).plans.length, 1)
+  assert.equal((await loadLaunchPlans(plansPath)).plans.length, 2)
   const launchManager = new PreexperimentLaunchManager({ plansPath, registrationRoot, runRegistryRoot })
   const catalog = await launchManager.catalog()
   assert.deepEqual(catalog.plans[0]?.cases, ['CASE_FIXTURE'])
@@ -569,6 +574,14 @@ try {
   assert.equal(startedRun.state, 'running')
   assert.notEqual(startedRun.runRoot, templateRoot)
   assert.ok(startedRun.commandSha256.length === 64)
+  await assert.rejects(
+    launchManager.start({
+      plan_id: 'fixture-secondary',
+      case_id: 'CASE_FIXTURE',
+      confirmation: 'START_EXTERNAL_PREEXPERIMENT',
+    }),
+    /still running/,
+  )
   let finalStatus = await launchManager.status({ run_id: startedRun.runId })
   for (let attempt = 0; attempt < 200 && !finalStatus.runs[0]?.terminalStateVerified; attempt += 1) {
     await new Promise(resolveDelay => setTimeout(resolveDelay, 25))
@@ -625,6 +638,7 @@ const report = {
     managedLaunchCreatesFreshRunRoot: true,
     managedLaunchRegistersSourcesBeforeObservation: true,
     managedLaunchRunsOnlySyntheticSupervisor: true,
+    managedLaunchSerializesAcrossPlans: true,
   },
 }
 

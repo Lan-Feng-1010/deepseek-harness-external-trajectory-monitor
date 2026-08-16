@@ -2,7 +2,7 @@
 
 ## Current package
 
-- Plugin version: `0.6.0`
+- Plugin version: `0.6.1`
 - Native live projection: `4.3.0`
 - Normalized ledger schema: `external-trajectory-ledger-v3`
 - Initially accepted Harness revision: `0.1.0-rc.5`, commit
@@ -34,8 +34,11 @@ events. It verifies:
 - combined-monitor tool allowlist and mandatory start approval;
 - a synthetic trusted-supervisor launch through a fresh copied run root;
 - runtime source registration before observation and terminal launcher status.
+- global serialization across different launch plans.
+- single-agent plans can be selected independently; validation is not an
+  ImplantAgent prerequisite or cross-agent gate.
 
-The `0.6.0` release keeps the Cordis ID and plugin entrypoints while adding an
+The `0.6.1` release keeps the Cordis ID and plugin entrypoints while adding an
 optional allowlisted managed-launch layer. Native ImplantAgent v0.8 trace
 support, retry-aware call identity, live-manifest hot reload, the generic
 adapter and ledger v3 remain unchanged. The synthetic regression is executed against

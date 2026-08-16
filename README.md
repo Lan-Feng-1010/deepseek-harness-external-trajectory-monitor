@@ -2,7 +2,7 @@
 
 DeepSeek Harness's universal external-agent launch and real-time trajectory monitoring plugin. It can passively observe any registered append-only JSONL source, or—when explicitly enabled—ask for human approval and start a preconfigured trusted supervisor. It projects public events into Harness's native Trajectory UI and generates a comparable append-only normalized ledger. Codex and Claude use built-in adapters; other agents use the unified `external-agent-event-v1` protocol.
 
-Current plugin version: `0.6.0`<br>
+Current plugin version: `0.6.1`<br>
 Native real-time projection version: `4.3.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
@@ -115,10 +115,11 @@ Cordis Host/Client extension shape rather than ACP. At that revision ACP creates
 Harness-owned agents; it is not an ingress protocol for an existing external
 agent's tool trajectory.
 
-Version `0.6.0` uses TypeScript authoring for both Host and Client. Harness still
+Version `0.6.1` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
 `trajectory_stats` tool and SessionEvent projection remain compatible. Version
-`0.6.0` adds optional managed external preexperiment tools while preserving
+`0.6.1` adds optional managed external preexperiment tools and globally
+serializes managed runs across plans, while preserving
 repeated logical call IDs, the generic adapter and ledger schema v3.
 
 Relevant upstream documents:
@@ -187,6 +188,14 @@ directories. A start copies that template into a unique directory below
 registrations are hot-loaded into the live monitor, so a newly launched case
 appears without restarting Harness. See
 [docs/MANAGED_PREEXPERIMENTS.md](docs/MANAGED_PREEXPERIMENTS.md).
+
+Agent choice is represented by enabled local plans. A deployment may expose
+separate Codex-only, Claude-only and ImplantAgent-only plans plus reviewed
+fixed-order plans. Starting a single-agent plan does not require either of the
+other agents to be available. To choose an arbitrary order without creating
+every permutation, start one single-agent plan, wait until its managed record
+is terminal, then start the next. The launcher rejects overlap across all plans
+so evaluated processes do not share a managed run window.
 
 ## Install in DeepSeek Harness
 
@@ -286,7 +295,9 @@ preexperiments. The evaluated work must be performed by the trusted external
 Codex/Claude/other-agent supervisor, not by you.
 
 1. Call external_preexperiment_catalog.
-2. Verify that plan <PLAN_ID> and case <CASE_ID> are listed. If either is not
+2. Select only the plan requested by the user (for example Codex-only,
+   Claude-only, ImplantAgent-only, or an allowlisted fixed sequence). Verify
+   that plan <PLAN_ID> and case <CASE_ID> are listed. If either is not
    allowlisted, stop and report that without trying another tool.
 3. Call external_preexperiment_start exactly once with that plan_id, case_id,
    and confirmation="START_EXTERNAL_PREEXPERIMENT". Wait for the Harness human
@@ -295,6 +306,10 @@ Codex/Claude/other-agent supervisor, not by you.
 4. Call external_preexperiment_status for the returned run_id. Summarize only
    public launcher state. Use trajectory_stats for deterministic tool counts and
    errors once sources emit events.
+
+If the user requested another agent afterward, wait until the first run is
+terminal, then repeat steps 1-4 with that agent's single-agent plan. Never start
+two plans concurrently.
 
 Never use terminal, filesystem, code-execution, network, or unrelated tools.
 Never alter model/provider settings, prompts, tools, baselines, case inputs, or

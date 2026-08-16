@@ -386,6 +386,10 @@ export class PreexperimentLaunchManager {
       const caseSpec = plan.cases.find(item => item.caseId === args.case_id)
       if (caseSpec === undefined) throw new Error(`case is not allowlisted for plan ${plan.id}: ${args.case_id}`)
       const records = await loadRunRecords(this.options.runRegistryRoot)
+      const activeManagedRuns = records.filter(record => record.state === 'running' && processAlive(record.processId) === true)
+      if (activeManagedRuns.length > 0) {
+        throw new Error(`managed run ${activeManagedRuns[0]?.runId ?? 'unknown'} is still running; wait for it to finish before starting another external agent`)
+      }
       const activeForPlan = records.filter(record => record.planId === plan.id && record.state === 'running' && processAlive(record.processId) === true)
       if (activeForPlan.length >= plan.maxConcurrentRuns) throw new Error(`launch plan ${plan.id} reached its concurrent-run limit`)
 
