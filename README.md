@@ -27,7 +27,7 @@ Native real-time projection version: `4.2.0`
   DeepSeek monitor agent can answer questions about calls, failures and
   observed recovery without guessing counts from a long transcript.
 - Keeps Codex/Claude native parsing and supports optional structured workflow
-  overlays such as ImplantAgent M1-M6/T01-T13. Such overlays never define the
+  overlays supplied explicitly by a source. Such overlays never define the
   generic core and never infer nodes from text or call order.
 
 Harness is an observability layer only. The plugin does not modify prompts,
@@ -59,9 +59,9 @@ matching assistant `tool-call` block.
   observational request anchor; later public checkpoints are associated with
   the next tool request. This anchor is not hidden chain-of-thought and is not
   represented as verbatim model text.
-- ImplantAgent module projection is an optional fail-closed overlay. Only the exact registered MCP
-  server/tool identities are mapped to M1-M6 and T01-T13. Free-form agents are
-  never assigned invented ImplantAgent nodes.
+- Structured module projection is an optional fail-closed overlay. Only exact,
+  explicitly registered tool identities may be mapped to fixed workflow nodes;
+  free-form agents are never assigned invented nodes.
 
 ## Repository layout
 
@@ -78,7 +78,7 @@ scripts/sanitize-build.ts   Removes local absolute paths from compiled bundles
 cordis.patch.yml            Cordis bundle patch
 runtime-sources.json        Optional historical import manifest; empty by default
 live-sources.json           Active live manifest; empty by default
-live-sources.example.json   Generic/Codex/Claude/ImplantAgent examples
+live-sources.example.json   Generic/Codex/Claude/custom-agent examples
 scripts/validate.ts         Synthetic, model-free regression test
 docs/                       Monitor-agent and comparison documentation
 ```
@@ -97,9 +97,9 @@ agent's tool trajectory.
 Version `0.5.2` uses TypeScript authoring for both Host and Client. Harness still
 loads the compiled JavaScript artifacts. The Cordis row ID, `apply()` entry,
 `trajectory_stats` tool and SessionEvent projection remain compatible. Version
-`0.5.2` adds native v0.8 ImplantAgent trace projection, preserves repeated
-logical call IDs by separating revision/retry attempts, and hot-reloads the live
-source manifest while retaining the generic adapter and ledger schema v3.
+`0.5.2` preserves repeated logical call IDs by separating revision/retry
+attempts and hot-reloads the live source manifest while retaining the generic
+adapter and ledger schema v3.
 
 Relevant upstream documents:
 
@@ -117,11 +117,11 @@ Important fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | Stable source identity. The example IDs work with monitor-agent aliases. |
-| `kind` | `generic`, `codex`, `claude`, or native `implantagent-trace`. |
+| `kind` | `generic`, `codex`, or `claude`; private/custom adapters may define additional kinds. |
 | `root` | Directory receiving append-only JSONL files. |
 | `cwd` | External agent workspace shown in the mirrored session metadata. |
 | `nativeSession` | Create a native Harness Trajectory session when true. |
-| `projectionMode` | Use `implantagent-modules` only for exact fixed MCP tool streams. |
+| `projectionMode` | Optional explicit projection mode for a separately defined structured-workflow adapter. |
 | `ledgerRoot` | Directory for append-only normalized ledgers. |
 
 For any non-Codex/Claude process, set `kind` to `generic` and emit the canonical
@@ -196,11 +196,11 @@ npm run validate
 ```
 
 It verifies generic-agent Request/tool projection, increasing request steps,
-assistant-to-tool linkage, Codex source
-time nullability, Claude message deduplication and durations, hidden-thinking
-exclusion, exact ImplantAgent M1-M6/T01-T13 mapping, ledger sequence/tool
-transitions, deterministic statistics and the read-only session guard. It does
-not call Codex, Claude, DeepSeek or a patient-case pipeline.
+assistant-to-tool linkage, Codex source time nullability, Claude message
+deduplication and durations, hidden-thinking exclusion, fail-closed structured
+workflow mapping, ledger sequence/tool transitions, deterministic statistics
+and the read-only session guard. It does not call Codex, Claude, DeepSeek or a
+patient-case pipeline.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for the acceptance boundary.
 
@@ -227,7 +227,7 @@ See [docs/MONITOR_AGENT.md](docs/MONITOR_AGENT.md).
 - Tool execution success is not clinical correctness.
 - “Observed recovery” means a later success for the same normalized tool; it is
   not proof that the root cause was fixed.
-- Free-form agent milestones are not equivalent to ImplantAgent fixed nodes.
+- Free-form agent milestones are not equivalent to fixed workflow nodes.
 - Hidden chain-of-thought is intentionally unavailable and must not be
   reconstructed.
 
