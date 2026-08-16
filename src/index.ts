@@ -50,7 +50,7 @@ const DEFAULT_MANIFEST_PATH = fileURLToPath(new URL('./sources.json', import.met
 const DEFAULT_LIVE_MANIFEST_PATH = fileURLToPath(new URL('./live-sources.json', import.meta.url))
 const DEFAULT_LEDGER_ROOT = fileURLToPath(new URL('./generated-ledgers', import.meta.url))
 const SESSION_PREFIX = 'session-external-trajectory-'
-export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v4`
+export const LIVE_MONITOR_SESSION_ID = `${SESSION_PREFIX}live-monitor-v3-2`
 export const NATIVE_LIVE_PROJECTION_VERSION = '4.0.0'
 export const NORMALIZED_LEDGER_SCHEMA = 'external-trajectory-ledger-v3'
 const TRACE_ROUTE = '/api/external-reasoning-trace'
@@ -1089,7 +1089,8 @@ function liveRunRecord(records: readonly JsonlRecord[], details: LatestLiveFile[
 }
 
 export function nativeLiveSessionId(source: LiveSource, path: string, caseId: string): string {
-  return `${SESSION_PREFIX}native-v4-${sanitizeId(source.id)}-${sanitizeId(caseId)}-${sha256Text(path).slice(0, 12)}`
+  const sessionProjection = source.kind === 'generic' ? 'v4' : 'v3-2'
+  return `${SESSION_PREFIX}native-${sessionProjection}-${sanitizeId(source.id)}-${sanitizeId(caseId)}-${sha256Text(path).slice(0, 12)}`
 }
 
 function nativeLiveTitle(state: NativeLiveState, status = 'RUNNING'): string {

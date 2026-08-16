@@ -3,7 +3,7 @@ import type { EventLog, HarnessContext, HarnessSession, HistoricalSource, JsonOb
 export type { HistoricalSource, JsonlRecord, LedgerFields, LiveSource, MonitorStatsArgs, NativeLiveState, NormalizedLedgerRecord, ObservableTrace, ObservableTraceEvent, PluginConfig, SourceManifest, } from './types.ts';
 export declare const name = "external-trajectory-importer";
 export declare const inject: string[];
-export declare const LIVE_MONITOR_SESSION_ID = "session-external-trajectory-live-monitor-v4";
+export declare const LIVE_MONITOR_SESSION_ID = "session-external-trajectory-live-monitor-v3-2";
 export declare const NATIVE_LIVE_PROJECTION_VERSION = "4.0.0";
 export declare const NORMALIZED_LEDGER_SCHEMA = "external-trajectory-ledger-v3";
 export declare function loadManifest(path?: string): Promise<SourceManifest>;
