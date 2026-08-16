@@ -1,12 +1,9 @@
 # DeepSeek Harness External Trajectory Monitor
 
-DeepSeek Harness 的通用外部智能体实时轨迹监视插件。它只读观察任意外部
-agent 进程持续追加的公开 JSONL 事件，并将其投影到 Harness 原生 Trajectory
-UI，同时生成可比较的 append-only normalized ledger。Codex 和 Claude 使用
-内置适配器；其他 agent 使用统一 `external-agent-event-v1` 协议。
+DeepSeek Harness's universal external agent real-time trajectory monitoring plugin. It passively observes publicly exposed JSONL events continuously appended by any external agent process, projects them into Harness's native Trajectory UI, and simultaneously generates a comparable append-only normalized ledger. Codex and Claude use built-in adapters; other agents use the unified `external-agent-event-v1` protocol.
 
-当前插件版本：`0.5.0`<br>
-原生实时投影版本：`4.0.0`
+Current plugin version：`0.5.0`<br>
+Native real-time projection version：`4.0.0`
 
 > This is an out-of-tree Cordis plugin, not an official DeepSeek component.
 > DeepSeek Harness is still pre-release, so compatibility must be revalidated
